@@ -1,6 +1,6 @@
+import platform
 from contextlib import AbstractContextManager
 from pathlib import Path
-import platform
 
 from remasep.core.errors import TemplateValidationError
 
