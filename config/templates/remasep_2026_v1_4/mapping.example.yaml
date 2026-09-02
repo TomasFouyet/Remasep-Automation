@@ -1,0 +1,16 @@
+# Placeholder: todavía NO contiene coordenadas reales.
+#
+# Ejemplo conceptual:
+#
+# mappings:
+#   - match:
+#       formulario: REMASEP_01
+#       categoria: CONSULTA_MEDICA
+#       especialidad: GENETICA
+#       sexo: MUJER
+#       edad: 20_24
+#     destination:
+#       sheet: REMASEP 01
+#       cell: G54
+
+mappings: []

@@ -1,0 +1,16 @@
+version: "REMASEP_2026_V1.4"
+
+required_sheets:
+  - "NOMBRE"
+  - "REMASEP 01"
+  - "URGENCIAS"
+  - "REMASEP B1"
+  - "B2 ANEXO"
+  - "REMASEP_OD"
+  - "EyP_ET"
+  - "TV_MI"
+  - "SERV_SANGRE"
+  - "CONTROL"
+
+# Se completará con un fingerprint estructural validado.
+sentinels: []

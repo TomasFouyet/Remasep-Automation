@@ -1,0 +1,15 @@
+# SOLO EJEMPLOS TÉCNICOS. NO SON REGLAS REMASEP VALIDADAS.
+
+rules:
+  - id: example_genetica_presencial
+    description: "Ejemplo técnico."
+    conditions:
+      ESPECIALIDAD:
+        eq: "GENETICA"
+      MODALIDAD:
+        eq: "PRESENCIAL"
+    result:
+      formulario: "REMASEP_01"
+      categoria: "CONSULTA_MEDICA"
+      especialidad: "GENETICA"
+      modalidad: "PRESENCIAL"
