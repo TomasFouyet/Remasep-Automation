@@ -5,6 +5,9 @@ display físico, y expone un constructor de workbooks Medinet sintéticos.
 """
 
 import os
+import re
+import shutil
+import zipfile
 
 import pytest
 from openpyxl import Workbook
@@ -32,6 +35,49 @@ def qapp():
 
     app = QApplication.instance() or QApplication([])
     yield app
+
+
+def _xml_escape(text: str) -> str:
+    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+@pytest.fixture
+def inject_formula_cache():
+    """Inyecta valores *cacheados* (`<v>`) en celdas con fórmula de un `.xlsx`.
+
+    openpyxl no escribe valores cacheados; los comparadores leen `data_only=True`,
+    así que los tests parchean el XML de la hoja tras guardar.
+    ``cache`` = ``{(fila_int, columna_letra): valor}``.
+    """
+
+    def _inject(path, cache, *, sheet_xml="xl/worksheets/sheet1.xml"):
+        with zipfile.ZipFile(path) as zf:
+            names = zf.namelist()
+            xml = zf.read(sheet_xml).decode("utf-8")
+
+        for (row, col), value in cache.items():
+            ref = f"{col}{row}"
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                replacement = rf'<c r="{ref}"\g<attrs>><f>\g<f></f><v>{value}</v></c>'
+            else:
+                replacement = (
+                    rf'<c r="{ref}"\g<attrs> t="str"><f>\g<f></f>'
+                    rf'<v>{_xml_escape(str(value))}</v></c>'
+                )
+            pattern = re.compile(
+                rf'<c r="{ref}"(?P<attrs>[^>]*)><f>(?P<f>[^<]*)</f>(?:<v\s*/>|<v></v>)</c>'
+            )
+            xml, n = pattern.subn(replacement, xml)
+            assert n == 1, f"no se pudo parchear {ref}"
+
+        tmp = str(path) + ".tmp"
+        with zipfile.ZipFile(path) as src, zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as dst:
+            for name in names:
+                data = xml.encode("utf-8") if name == sheet_xml else src.read(name)
+                dst.writestr(name, data)
+        shutil.move(tmp, path)
+
+    return _inject
 
 
 @pytest.fixture

@@ -10,7 +10,15 @@
       "Bash(python scripts/compare_legacy_derived.py \"data/local/GENERACION DATOS REMASEP.xlsx\" --output artifacts/legacy_equivalence)",
       "Bash(python -m pytest tests/test_legacy_transform.py -q)",
       "Bash(python -m pytest tests/test_compare_legacy_derived.py -q)",
-      "Bash(python -m pytest tests/test_legacy_transform.py tests/test_medinet_analysis.py -q)"
+      "Bash(python -m pytest tests/test_legacy_transform.py tests/test_medinet_analysis.py -q)",
+      "Bash(time python scripts/compare_legacy_aggregations.py \"data/local/GENERACION DATOS REMASEP.xlsx\" --output artifacts/legacy_aggregation_equivalence)",
+      "Bash(awk -F, '{print $NF}')",
+      "Bash(awk -F, '$7==\"CACHE_DIFFERENCE\"')",
+      "Bash(awk -F, '$7==\"CACHE_DIFFERENCE\"{print $1\"!\"$2\" py=\"$5\" cache=\"$6}')",
+      "Bash(python scripts/compare_legacy_aggregations.py \"data/local/GENERACION DATOS REMASEP.xlsx\" --output artifacts/legacy_aggregation_equivalence)",
+      "Bash(python -m pytest tests/test_legacy_aggregation.py -q)",
+      "Bash(python -m pytest tests/test_compare_legacy_aggregations.py -x -q)",
+      "Bash(python scripts/compare_legacy_aggregations.py \"data/local/GENERACION DATOS REMASEP.xlsx\")"
     ]
   }
 }
