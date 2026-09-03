@@ -2,7 +2,15 @@
   "permissions": {
     "allow": [
       "Bash(python -m pytest tests/test_medinet_analysis.py -q)",
-      "Bash(git checkout *)"
+      "Bash(git checkout *)",
+      "Bash(python -c ' *)",
+      "Bash(time python scripts/compare_legacy_derived.py \"data/local/GENERACION DATOS REMASEP.xlsx\" --output artifacts/legacy_equivalence)",
+      "Bash(kill %1)",
+      "Bash(pkill -f \"legacy_transform\")",
+      "Bash(python scripts/compare_legacy_derived.py \"data/local/GENERACION DATOS REMASEP.xlsx\" --output artifacts/legacy_equivalence)",
+      "Bash(python -m pytest tests/test_legacy_transform.py -q)",
+      "Bash(python -m pytest tests/test_compare_legacy_derived.py -q)",
+      "Bash(python -m pytest tests/test_legacy_transform.py tests/test_medinet_analysis.py -q)"
     ]
   }
 }

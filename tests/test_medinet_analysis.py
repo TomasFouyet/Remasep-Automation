@@ -14,6 +14,7 @@ from remasep.adapters.medinet import read_medinet
 from remasep.core.errors import SourceValidationError
 from remasep.services.common import Period
 from remasep.services.legacy_rules import load_legacy_rules
+from remasep.services.legacy_transform import legacy_derived_value
 from remasep.services.medinet_analysis import (
     ANALYSIS_MODE_REAL,
     MedinetAnalysisService,
@@ -299,19 +300,82 @@ def test_legacy_rule_matches(make_medinet, service, code, field, value):
     assert result.non_target_records == 1
 
 
-# --- 19. casing / acentos -----------------------------------------
+# --- 19. semántica legacy: case-insensitive, CON tildes, whitespace exacto ------
 
 
-def test_matching_ignores_casing_and_accents(make_medinet, service):
+def test_matching_is_case_insensitive(make_medinet, service):
     path = make_medinet(
         [
+            # minúsculas (el valor de la regla no lleva tildes) -> match AG
             _row(tipo="consulta medica de especialidad en genetica clinica - cod.0101325"),
-            _row(prestacion="previo  control  aparato  removible  posterior"),
+            # minúsculas, espacios simples -> match AJ (contains)
+            _row(prestacion="previo control aparato removible posterior"),
         ]
     )
     result = service.analyze(path, PERIOD)
     assert result.legacy_counts["AG"] == 1
     assert result.legacy_counts["AJ"] == 1
+
+
+def test_matching_is_accent_sensitive(make_medinet, service):
+    # "CONTROL EVOLUCION DENTARIA" (sin tilde) NO coincide con la regla AH
+    # "CONTROL EVOLUCIÓN DENTARIA"; sí coincide en minúsculas con tilde.
+    path = make_medinet(
+        [
+            _row(tipo="CONTROL EVOLUCION DENTARIA"),  # sin tilde -> no match
+            _row(tipo="control evolución dentaria"),  # minúsculas + tilde -> match
+        ]
+    )
+    result = service.analyze(path, PERIOD)
+    assert result.legacy_counts["AH"] == 1
+
+
+def test_legacy_matching_is_whitespace_exact_through_pipeline(make_medinet, service):
+    # read_medinet ya NO recorta los valores de texto: el pipeline completo
+    # (adapter -> service -> LegacyRuleSet) usa el mismo texto que el workbook.
+    path = make_medinet(
+        [
+            _row(tipo=" CONTROL EVOLUCIÓN DENTARIA"),  # espacio inicial -> NO match AH
+            _row(tipo="CONTROL EVOLUCIÓN DENTARIA "),  # espacio final -> NO match AH
+            _row(tipo="CONTROL  EVOLUCIÓN DENTARIA"),  # doble espacio interno -> NO match AH
+            _row(tipo="control evolución dentaria"),  # solo casing -> match AH
+        ]
+    )
+    result = service.analyze(path, PERIOD)
+    assert result.legacy_counts["AH"] == 1
+
+
+def test_countif_pattern_whitespace_is_exact_through_pipeline(make_medinet, service):
+    # patrón AJ = "CONTROL APARATO REMOVIBLE" (espacios simples).
+    path = make_medinet(
+        [
+            _row(prestacion="pre control aparato removible post"),  # substring exacto -> match
+            _row(prestacion="pre control  aparato removible post"),  # doble espacio -> NO match
+            _row(prestacion=" CONTROL APARATO REMOVIBLE "),  # el patrón sí es substring -> match
+            _row(prestacion="controlaparatoremovible"),  # sin espacios -> NO match
+        ]
+    )
+    result = service.analyze(path, PERIOD)
+    assert result.legacy_counts["AJ"] == 2
+
+
+def test_legacy_concat_preserves_whitespace_through_read_medinet(make_medinet):
+    # AC/AD/AE: la concatenación legacy conserva el whitespace inicial/final
+    # tal como sale de read_medinet (sin llamar al service).
+    rules = load_legacy_rules()
+    path = make_medinet(
+        [_row(tipo=" CTRL ", sucursal="  SUC", especialidad="ESP ", sexo="Mujer ", prestacion=" P")]
+    )
+    frame = read_medinet(path).frame
+    record = frame.iloc[0].to_dict()
+
+    assert record["TIPO_DE_CITA"] == " CTRL "
+    assert record["SUCURSAL"] == "  SUC"
+    assert record["SEXO"] == "Mujer "
+
+    assert legacy_derived_value("AC", record, rules) == " CTRL   SUC"  # TIPO + SUCURSAL
+    assert legacy_derived_value("AD", record, rules) == " CTRL Mujer "  # TIPO + SEXO
+    assert legacy_derived_value("AE", record, rules) == " PESP Mujer "  # PRESTACION+ESPECIALIDAD+SEXO
 
 
 # --- 20. no-match válido -----------------------------------------

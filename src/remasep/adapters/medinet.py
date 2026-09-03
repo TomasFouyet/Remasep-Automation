@@ -4,9 +4,14 @@ Responsabilidades:
 
 - verificar que el archivo existe y es ``.xlsx``;
 - localizar la hoja de datos por sus **encabezados** (no por letra de columna);
-- normalizar los encabezados a nombres semánticos
+- **normalizar los encabezados** a nombres semánticos
   (``DIA_CITA``, ``FECHA_NACIMIENTO``, ...);
-- devolver un ``DataFrame`` normalizado con solo las columnas reconocidas.
+- devolver un ``DataFrame`` con solo las columnas reconocidas, **preservando el
+  valor textual de cada celda tal cual llega de Excel** (sin strip/collapse), para
+  que la clasificación legacy use exactamente el mismo texto que el workbook.
+  ``None``/``NaN`` se representan como ``""``; las fechas se parsean a ``datetime``.
+
+Solo se normaliza el ENCABEZADO, nunca el valor de la celda de texto.
 
 NO clasifica, NO valida registros y NO calcula edades: eso vive en
 ``remasep.services.medinet_analysis``.
@@ -89,6 +94,20 @@ def _score_headers(columns: list[object]) -> tuple[int, dict[str, str]]:
     return score, mapping
 
 
+def semantic_column_map(headers) -> dict[str, str]:
+    """`{str(encabezado): nombre_semántico}` para los encabezados reconocidos."""
+    _score, mapping = _score_headers(list(headers))
+    return mapping
+
+
+def is_blank_cell(value: object) -> bool:
+    """Definición escalar de "celda vacía" (equivalente a los `blank_masks` del adapter)."""
+    if value is None:
+        return True
+    text = str(value).strip()
+    return text == "" or text in {"NaT", "nan", "None", "<NA>"}
+
+
 def _locate_data_sheet(excel: pd.ExcelFile) -> tuple[str, dict[str, str]]:
     best: tuple[int, str, dict[str, str]] | None = None
     for name in excel.sheet_names:
@@ -150,6 +169,8 @@ def read_medinet(path: str | Path, *, sheet_name: str | int | None = None) -> Me
     blank_masks: dict[str, pd.Series] = {}
     for column in detected:
         original = frame[column]
+        # Detección de "vacío" (para validación y structural_empty_rows): incluye
+        # celdas solo-whitespace. SOLO detección: no muta el valor almacenado.
         blank = original.isna() | (
             original.astype("string").str.strip().isin(["", "NaT", "nan", "None", "<NA>"])
         )
@@ -158,7 +179,10 @@ def read_medinet(path: str | Path, *, sheet_name: str | int | None = None) -> Me
         if column in DATE_FIELDS:
             frame[column] = pd.to_datetime(original, errors="coerce", dayfirst=True)
         else:
-            frame[column] = original.astype("string").fillna("").str.strip()
+            # Se PRESERVA el whitespace del valor de texto (semántica legacy
+            # exacta): el core clasifica/concatena con el mismo texto que usaría
+            # el workbook Excel. None/NaN -> "".
+            frame[column] = original.astype("string").fillna("")
 
     frame = frame.reset_index(drop=True)
     for mask in blank_masks.values():

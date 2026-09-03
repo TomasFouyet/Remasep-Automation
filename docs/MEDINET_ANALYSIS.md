@@ -34,6 +34,14 @@ El adaptador trabaja con **nombres semánticos**, nunca con letras de columna
 Sin fuzzy matching. Cualquier columna no reconocida (RUN, nombre, teléfono…) se
 **descarta al leer**.
 
+**Solo se normaliza el encabezado, nunca el valor de la celda.** `read_medinet`
+preserva el texto de cada celda tal cual llega de Excel (sin `strip` ni colapso
+de espacios), para que la clasificación legacy use exactamente el mismo texto que
+el workbook. `None`/`NaN` se representan como `""`; las fechas se parsean a
+`datetime` (`dd/mm/aaaa`). La detección de "vacío" (validación,
+`structural_empty_rows`) sí considera vacía una celda de solo whitespace, pero es
+**solo detección**: no muta el valor almacenado.
+
 ### Campos requeridos
 
 `DIA_CITA`, `FECHA_NACIMIENTO`, `SEXO`, `SUCURSAL`, `ESPECIALIDAD`,
@@ -138,10 +146,13 @@ Las fórmulas de Excel **no** se ejecutan como strings; se representan como dato
 | `AK` | controles ortopedia prequirúrgica | `PRESTACION` | `contains` |
 | `AL` | instalaciones ortopedia | `PRESTACION` | `contains` |
 
-El matching usa `remasep.core.text.normalize_text` (mayúsculas, sin tildes,
-espacios colapsados). `equals` = igualdad normalizada exacta; `contains` = el
-valor normalizado de la regla aparece dentro del `PRESTACION` normalizado.
-27 valores en total (3 + 4 + 6 + 6 + 3 + 5).
+El matching usa `remasep.core.text.normalize_legacy_text` (**case-insensitive**,
+**con tildes**, whitespace exacto — la misma semántica que reproduce el
+workbook Excel, ver [`LEGACY_EQUIVALENCE.md`](LEGACY_EQUIVALENCE.md)).
+`equals` = igualdad normalizada exacta; `contains` = el valor normalizado de la
+regla aparece dentro del `TIPO_DE_CITA`/`PRESTACION` normalizado. Un mismo módulo
+lo comparten `LegacyRuleSet` y `legacy_transform`. 27 valores en total
+(3 + 4 + 6 + 6 + 3 + 5).
 
 ---
 

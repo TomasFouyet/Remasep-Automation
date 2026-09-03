@@ -27,6 +27,9 @@ categories:
     source_column: AG
     field: TIPO_DE_CITA
     operator: equals
+    # Literal exacto que emite el IFS del workbook al hacer match (para AC:AL
+    # equivalence). El valor de la celda AG es `output_literal + SEXO`.
+    output_literal: "consulta médico"
     values:
       - "CONSULTA MEDICA DE ESPECIALIDAD EN CIRUGIA PLASTICA Y REPARADORA - COD.0101316"
       - "CONSULTA MEDICA DE ESPECIALIDAD EN GENETICA CLINICA - COD.0101325"
@@ -37,6 +40,7 @@ categories:
     source_column: AH
     field: TIPO_DE_CITA
     operator: equals
+    output_literal: "control odon esp"
     values:
       - "CONTROL ODONTOPEDIATRÍA"
       - "CONTROL EVOLUCIÓN DENTARIA"
@@ -48,6 +52,7 @@ categories:
     source_column: AI
     field: TIPO_DE_CITA
     operator: equals
+    output_literal: "evaluacion odon esp"
     values:
       - "EVALUACIÓN DE ORTODONCIA"
       - "EVALUACIÓN REHABILITACIÓN ORAL"

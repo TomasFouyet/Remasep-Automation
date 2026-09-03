@@ -19,10 +19,22 @@ import pandas as pd
 
 from remasep.adapters.medinet import (
     OPTIONAL_FIELDS,
+    MedinetFrame,
     read_medinet,
 )
 from remasep.services.common import Period, ValidationResult
 from remasep.services.legacy_rules import LegacyRuleSet, load_legacy_rules
+from remasep.services.legacy_transform import legacy_age_years
+
+__all__ = [
+    "ANALYSIS_MODE_REAL",
+    "ColumnDiagnostic",
+    "MedinetAnalysisResult",
+    "MedinetAnalysisService",
+    "RecordProblem",
+    "legacy_age_years",
+    "structural_empty_mask",
+]
 
 ANALYSIS_MODE_REAL = "REAL"
 
@@ -116,23 +128,16 @@ class _AgeBreakdown:
     missing: int = 0
 
 
-def legacy_age_years(birth: object, service: object) -> int | None:
-    """Años completos cumplidos a la fecha de atención (equivale a ``DATEDIF(b, s, "Y")``).
+def structural_empty_mask(medinet: MedinetFrame) -> pd.Series:
+    """Filas estructuralmente vacías (Sprint 2.1): todos los campos semánticos vacíos.
 
-    Excepción de compatibilidad legacy: si ``birth > service`` la fórmula actual
-    del workbook devuelve ``0``; aquí se reproduce ese comportamiento.
-    Devuelve ``None`` si falta alguna de las dos fechas.
+    Definición única compartida por :class:`MedinetAnalysisService` y el comparador
+    de equivalencia legacy.
     """
-    if birth is None or service is None or pd.isna(birth) or pd.isna(service):
-        return None
-    birth_ts = pd.Timestamp(birth)
-    service_ts = pd.Timestamp(service)
-    if birth_ts > service_ts:
-        return 0
-    years = service_ts.year - birth_ts.year
-    if (service_ts.month, service_ts.day) < (birth_ts.month, birth_ts.day):
-        years -= 1
-    return int(years)
+    mask = medinet.blank_masks[medinet.detected_fields[0]].copy()
+    for field_name in medinet.detected_fields[1:]:
+        mask &= medinet.blank_masks[field_name]
+    return mask.fillna(False).astype(bool)
 
 
 def _iso_date(value: object) -> str | None:
@@ -203,10 +208,7 @@ class MedinetAnalysisService:
         # Una fila es estructuralmente vacía solo si TODOS los campos semánticos
         # reconocidos están vacíos (fórmulas AC:AL del workbook legacy arrastradas
         # más allá de las atenciones reales). No se cuentan ni generan problemas.
-        structural_empty = masks[medinet.detected_fields[0]].copy()
-        for field_name in medinet.detected_fields[1:]:
-            structural_empty &= masks[field_name]
-        structural_empty = structural_empty.fillna(False).astype(bool)
+        structural_empty = structural_empty_mask(medinet)
         active = ~structural_empty
         structural_empty_rows = int(structural_empty.sum())
         total = int(active.sum())

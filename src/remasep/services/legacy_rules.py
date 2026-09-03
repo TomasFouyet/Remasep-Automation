@@ -4,8 +4,9 @@ Estas reglas reproducen la lógica observada en ``GENERACION DATOS REMASEP.xlsx`
 (columnas AG:AL) y están **pendientes de validación funcional**. No son reglas
 oficiales MINSAL. Se cargan desde ``config/legacy_current_logic_2026/rules.yaml``.
 
-El matching usa :func:`remasep.core.text.normalize_text` (mayúsculas, sin tildes,
-espacios colapsados). No hay fuzzy matching.
+El matching usa :func:`remasep.core.text.normalize_legacy_text` (case-insensitive,
+**con tildes**, whitespace exacto) — la misma semántica que ``legacy_transform``.
+No hay fuzzy matching.
 """
 
 from __future__ import annotations
@@ -17,7 +18,7 @@ from pathlib import Path
 import yaml
 
 from remasep.core.errors import RemasepError
-from remasep.core.text import normalize_text
+from remasep.core.text import normalize_legacy_text
 
 DEFAULT_LEGACY_RULES_PATH = (
     Path(__file__).resolve().parents[3]
@@ -41,14 +42,20 @@ class LegacyCategory:
     field: str
     operator: str
     values: tuple[str, ...]
+    output_literal: str = ""  # literal exacto emitido por el IFS del workbook (EXACT_MAP)
 
     def __post_init__(self) -> None:
         object.__setattr__(
-            self, "_normalized", tuple(normalize_text(value) for value in self.values)
+            self, "_normalized", tuple(normalize_legacy_text(value) for value in self.values)
         )
 
+    @property
+    def normalized_values(self) -> tuple[str, ...]:
+        """Valores del patrón ya normalizados con la semántica legacy."""
+        return self._normalized
+
     def matches(self, row: Mapping[str, object]) -> bool:
-        target = normalize_text(row.get(self.field))
+        target = normalize_legacy_text(row.get(self.field))
         if not target:
             return False
         if self.operator == "equals":
@@ -68,6 +75,12 @@ class LegacyRuleSet:
     @property
     def codes(self) -> tuple[str, ...]:
         return tuple(category.code for category in self.categories)
+
+    def category(self, code: str) -> LegacyCategory:
+        for category in self.categories:
+            if category.code == code:
+                return category
+        raise KeyError(f"Categoría legacy desconocida: {code!r}")
 
     def classify(self, row: Mapping[str, object]) -> list[str]:
         """Códigos de categoría legacy que activa el registro (0, 1 o más)."""
@@ -107,6 +120,7 @@ def load_legacy_rules(path: str | Path | None = None) -> LegacyRuleSet:
                 field=field,
                 operator=operator,
                 values=values,
+                output_literal=str(raw.get("output_literal", "")),
             )
         )
 
