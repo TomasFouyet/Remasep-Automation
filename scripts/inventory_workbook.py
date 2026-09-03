@@ -132,9 +132,15 @@ _WS_RE = re.compile(r"\s+")
 
 
 def extract_function_names(formula: str) -> list[str]:
-    """Nombres de función usados en la fórmula, normalizados y ordenados."""
+    """Nombres de función usados en la fórmula, normalizados y ordenados.
+
+    Los literales de texto de Excel (``"..."``) se eliminan antes de buscar
+    llamadas para no confundir palabras seguidas de ``(`` dentro de un string
+    (p.ej. ``"CONTROL CLINICO (ADULTOS)"``) con funciones reales.
+    """
+    stripped = _STR_RE.sub(" ", formula)
     names: set[str] = set()
-    for raw in _FUNC_CALL_RE.findall(formula):
+    for raw in _FUNC_CALL_RE.findall(stripped):
         name = _XL_PREFIX_RE.sub("", raw).upper().strip(".")
         if name:
             names.add(name)

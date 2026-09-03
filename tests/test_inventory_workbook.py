@@ -219,3 +219,33 @@ def test_normalize_formula_examples():
 def test_extract_function_names_strips_xlfn():
     assert iw.extract_function_names("=_xlfn.XLOOKUP(A1,B:B,C:C)") == ["XLOOKUP"]
     assert iw.extract_function_names("=A1+B1") == []
+
+
+def test_extract_function_names_ignores_string_literals():
+    # Palabras seguidas de "(" dentro de un literal no son funciones.
+    assert iw.extract_function_names(
+        '=IF(A1<>0,"* EMBARAZADAS (Digite CERO) *","")'
+    ) == ["IF"]
+    assert iw.extract_function_names(
+        '=COUNTIF(A:A,"CONTROL CLINICO (ADULTOS)")'
+    ) == ["COUNTIF"]
+
+    # Otros falsos positivos reales encontrados en el workbook.
+    for word in ("MIGRANTES", "ADULTOS", "INSTRUMENTAL", "OS"):
+        assert iw.extract_function_names(f'=SUM(A1,"texto {word} (x)")') == ["SUM"]
+
+
+def test_extract_function_names_still_detects_real_functions():
+    cases = {
+        "=COUNTIF(A:A,1)": ["COUNTIF"],
+        '=COUNTIFS(A:A,"x",B:B,"y")': ["COUNTIFS"],
+        "=SUM(A1:A9)": ["SUM"],
+        '=IF(A1>0,"si","no")': ["IF"],
+        '=_xlfn.IFS(A1=1,"a",A1=2,"b")': ["IFS"],
+        '=DATEDIF(A1,B1,"Y")': ["DATEDIF"],
+    }
+    for formula, expected in cases.items():
+        assert iw.extract_function_names(formula) == expected
+
+    combined = '=IF(DATEDIF(A1,B1,"Y")>0,SUM(C1:C9),0)'
+    assert iw.extract_function_names(combined) == ["DATEDIF", "IF", "SUM"]
