@@ -221,7 +221,8 @@ def load_workbook_safely(path: Path) -> openpyxl.Workbook:
         ) from exc
 
 
-def _formula_text(value: object) -> str | None:
+def cell_formula_text(value: object) -> str | None:
+    """Texto de la fórmula de una celda openpyxl, o ``None`` si no es fórmula."""
     if isinstance(value, ArrayFormula):
         return value.text or None
     if DataTableFormula and isinstance(value, DataTableFormula):
@@ -242,7 +243,7 @@ def analyze_worksheet(ws) -> tuple[SheetStats, list[FormulaRecord]]:
                 continue
             non_empty += 1
 
-            formula = _formula_text(value) if cell.data_type == "f" else None
+            formula = cell_formula_text(value) if cell.data_type == "f" else None
             if formula is None and cell.data_type == "f":
                 # data_type dice fórmula pero el valor no lo parece; lo registramos igual.
                 formula = str(value)
