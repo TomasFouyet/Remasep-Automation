@@ -22,10 +22,21 @@ ERROR = "#cf222e"
 PENDING = "#8c959f"
 
 STYLESHEET = f"""
+/* Sin 'background' global: dejarlo aquí pintaba una franja gris tras cada QLabel
+   dentro de las tarjetas blancas. El fondo de página se pinta solo en los
+   contenedores; los QLabel son transparentes salvo clases concretas (badges,
+   pasos, banners). */
 QWidget {{
-    background: {BG};
     color: {TEXT};
     font-size: 14px;
+}}
+
+QMainWindow, QStackedWidget, QStackedWidget > QWidget {{
+    background: {BG};
+}}
+
+QLabel {{
+    background: transparent;
 }}
 
 QLabel[role="h1"] {{ font-size: 30px; font-weight: 600; }}
