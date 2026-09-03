@@ -201,13 +201,15 @@ def compute_sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def load_workbook_safely(path: Path) -> openpyxl.Workbook:
+def load_workbook_safely(path: Path, *, keep_vba: bool = False) -> openpyxl.Workbook:
     if not path.exists():
         raise InventoryError(f"El archivo no existe: {path}")
     if not path.is_file():
         raise InventoryError(f"La ruta no es un archivo: {path}")
     try:
-        return openpyxl.load_workbook(path, data_only=False, read_only=False)
+        return openpyxl.load_workbook(
+            path, data_only=False, read_only=False, keep_vba=keep_vba
+        )
     except (InvalidFileException, zipfile.BadZipFile, KeyError) as exc:
         raise InventoryError(
             f"No se pudo leer el workbook '{path}': {exc}. "
