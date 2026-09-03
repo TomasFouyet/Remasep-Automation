@@ -234,6 +234,109 @@ def test_demo_mode_runs_analysis(window):
     assert window.current_screen_name == "analysis"
 
 
+# --- Análisis REAL vs DEMO (Sprint 2.1) ---------------------------
+
+
+def _demo_rows():
+    from datetime import date
+
+    return [
+        [date(2026, 8, 5), date(1990, 1, 1), "F", "S", "E", "CONTROL PERIODONCIA", "x",
+         "ATENDIDO", "Presencial", ""],
+        [date(2026, 8, 9), date(1985, 6, 6), "M", "S", "E", "otra cita", "algo", "ANULADO",
+         "Telemedicina", ""],
+    ]
+
+
+def test_demo_button_still_uses_mock_service(window):
+    window.navigate("new_report")
+    window.screens["new_report"].demo_button.click()
+    assert window.state.analysis_mode == "DEMO"
+    assert window.state.analysis is not None  # MockRemasepService
+    assert window.state.medinet_analysis is None
+    assert window.screens["analysis"].badge.text() == "DATOS DE DEMOSTRACIÓN"
+
+
+def test_real_file_uses_medinet_analysis_service(window, make_medinet):
+    path = make_medinet(_demo_rows())
+    window.navigate("new_report")
+    new_report = window.screens["new_report"]
+    new_report.month_combo.setCurrentIndex(7)
+    new_report.year_spin.setValue(2026)
+    new_report.medinet_selector.set_selection(path)
+    assert new_report.analyze_button.isEnabled() is True
+
+    new_report.analyze_button.click()
+
+    assert window.current_screen_name == "analysis"
+    assert window.state.analysis_mode == "REAL"
+    assert window.state.analysis is None
+    result = window.state.medinet_analysis
+    assert result is not None
+    assert result.analysis_mode == "REAL"
+    assert result.total_records == 2
+    assert result.legacy_counts["AH"] == 1  # "CONTROL PERIODONCIA"
+
+
+def test_analysis_screen_distinguishes_real_and_demo(window, make_medinet):
+    analysis = window.screens["analysis"]
+
+    # DEMO
+    window.navigate("new_report")
+    window.screens["new_report"].demo_button.click()
+    assert analysis.badge.text() == "DATOS DE DEMOSTRACIÓN"
+    assert analysis.badge.property("badge") == "demo"
+    assert analysis.review_button.isHidden() is False
+    assert analysis.summary_button.isHidden() is True
+    assert analysis._registros_card.isHidden() is True
+
+    # REAL
+    window.navigate("new_report")
+    window.screens["new_report"].medinet_selector.set_selection(make_medinet(_demo_rows()))
+    window.screens["new_report"].analyze_button.click()
+    assert analysis.badge.text() == "ANÁLISIS REAL"
+    assert analysis.badge.property("badge") == "real"
+    assert analysis.review_button.isHidden() is True
+    assert analysis.summary_button.isHidden() is False
+    assert analysis._registros_card.isHidden() is False
+    assert analysis._result_card.isHidden() is True
+
+
+def test_real_flow_goes_to_diagnostic_summary_without_exceptions(window, make_medinet):
+    window.navigate("new_report")
+    window.screens["new_report"].medinet_selector.set_selection(make_medinet(_demo_rows()))
+    window.screens["new_report"].analyze_button.click()
+
+    # análisis real -> resumen (sin pasar por 'exceptions')
+    window.screens["analysis"].summary_button.click()
+    summary = window.screens["summary"]
+    assert window.current_screen_name == "summary"
+    assert summary._real_registros_card.isHidden() is False
+    assert summary._analysis_card.isHidden() is True  # nada del mock
+    assert summary.generate_button.isEnabled() is False
+    assert "Microsoft Excel" in summary.generate_button.toolTip()
+    assert "no disponible" in summary._banner_line2.text().lower()
+
+    # "Volver" en modo real regresa a análisis, no a excepciones
+    summary.back_button.click()
+    assert window.current_screen_name == "analysis"
+
+
+def test_real_analysis_read_error_is_shown_not_crash(window, tmp_path):
+    bad = tmp_path / "roto.xlsx"
+    bad.write_text("no soy un xlsx", encoding="utf-8")
+    window.navigate("new_report")
+    window.screens["new_report"].medinet_selector.set_selection(bad)
+    window.screens["new_report"].analyze_button.click()
+
+    assert window.current_screen_name == "analysis"
+    assert window.state.analysis_mode == "REAL"
+    assert window.state.analysis_error
+    analysis = window.screens["analysis"]
+    assert analysis.error_label.isHidden() is False
+    assert analysis._validations_card.isHidden() is True
+
+
 def test_default_period_survives_new_report_screen(window):
     # Entrar a 'Nuevo reporte' no debe pisar el año/mes por defecto del estado.
     expected_month, expected_year = window.state.month, window.state.year

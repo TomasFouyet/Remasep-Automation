@@ -11,13 +11,29 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 
+# Period / ValidationResult / month_name viven en un módulo neutral y se
+# re-exportan aquí para no romper los imports existentes de la UI.
+from remasep.services.common import Period, ValidationResult, month_name
+
+__all__ = [
+    "APP_VERSION",
+    "CLASSIFICATION_OPTIONS",
+    "IGNORE_OPTION",
+    "TEMPLATE_VERSION",
+    "AnalysisResult",
+    "ExceptionItem",
+    "MockRemasepService",
+    "ModuleStatus",
+    "Period",
+    "ReviewOutcome",
+    "SourceStatus",
+    "ValidationResult",
+    "month_name",
+    "project_review",
+]
+
 TEMPLATE_VERSION = "REMASEP 2026 V1.4"
 APP_VERSION = "0.1.0"
-
-_MONTHS_ES = [
-    "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
-    "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre",
-]
 
 # Opción especial: marca los registros de una excepción como ignorados.
 IGNORE_OPTION = "Ignorar justificadamente"
@@ -31,27 +47,6 @@ CLASSIFICATION_OPTIONS = [
     "Prestación odontológica",
     IGNORE_OPTION,
 ]
-
-
-def month_name(month: int) -> str:
-    return _MONTHS_ES[(month - 1) % 12]
-
-
-@dataclass(frozen=True)
-class Period:
-    month: int
-    year: int
-
-    @property
-    def label(self) -> str:
-        return f"{month_name(self.month)} {self.year}"
-
-
-@dataclass(frozen=True)
-class ValidationResult:
-    name: str
-    status: str  # "ok" | "warning" | "error"
-    message: str = ""
 
 
 @dataclass(frozen=True)

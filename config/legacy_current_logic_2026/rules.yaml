@@ -1,0 +1,92 @@
+# =============================================================================
+# Reglas legacy — compatibilidad con GENERACION DATOS REMASEP.xlsx
+# =============================================================================
+#
+# Estas reglas reproducen la lógica observada en el workbook
+# GENERACION DATOS REMASEP.xlsx (columnas AG:AL de la hoja
+# "Atenciones - Detalles de citas") y están PENDIENTES DE VALIDACIÓN FUNCIONAL.
+# NO son reglas oficiales MINSAL validadas.
+#
+# Origen: Sprint 1.3 — artifacts/current_logic/derived_rule_candidates.csv
+#
+# Semántica de matching (usa remasep.core.text.normalize_text):
+#   - operator "equals":   normalize_text(TIPO_DE_CITA) == normalize_text(value)
+#   - operator "contains": normalize_text(value) in normalize_text(PRESTACION)
+# Sin fuzzy matching. Un registro puede, en teoría, activar más de una categoría.
+
+version: legacy_current_logic_2026
+source_workbook: "GENERACION DATOS REMASEP.xlsx"
+status: pending_functional_validation
+disclaimer: >-
+  Estas reglas reproducen la lógica observada en GENERACION DATOS REMASEP.xlsx
+  y están pendientes de validación funcional. No son reglas oficiales MINSAL.
+
+categories:
+  - code: AG
+    label: "consultas médicas"
+    source_column: AG
+    field: TIPO_DE_CITA
+    operator: equals
+    values:
+      - "CONSULTA MEDICA DE ESPECIALIDAD EN CIRUGIA PLASTICA Y REPARADORA - COD.0101316"
+      - "CONSULTA MEDICA DE ESPECIALIDAD EN GENETICA CLINICA - COD.0101325"
+      - "CONSULTA MEDICA DE ESPECIALIDAD EN OTORRINOLARINGOLOGIA - COD.0101205"
+
+  - code: AH
+    label: "controles odontológicos de especialidad"
+    source_column: AH
+    field: TIPO_DE_CITA
+    operator: equals
+    values:
+      - "CONTROL ODONTOPEDIATRÍA"
+      - "CONTROL EVOLUCIÓN DENTARIA"
+      - "CONTROL PERIODONCIA"
+      - "CONTROL REHABILITACION ORAL"
+
+  - code: AI
+    label: "evaluaciones odontológicas de especialidad"
+    source_column: AI
+    field: TIPO_DE_CITA
+    operator: equals
+    values:
+      - "EVALUACIÓN DE ORTODONCIA"
+      - "EVALUACIÓN REHABILITACIÓN ORAL"
+      - "EVALUACIÓN ODONTOPEDIATRIA"
+      - "EVALUACIÓN PERIODONCIA"
+      - "EVALUACIÓN DE ORTOPEDIA POSTQ."
+      - "EVALUACIÓN DE ORTOPEDIA PREQ."
+
+  - code: AJ
+    label: "controles ortodoncia"
+    source_column: AJ
+    field: PRESTACION
+    operator: contains
+    values:
+      - "CONTROL APARATO REMOVIBLE"
+      - "CONTROL MÁSCARA Y/O DISYUNTOR"
+      - "CONTROL SPLINT"
+      - "CONTROL 2X4 SUP O INF"
+      - "CONTROL APARATO FIJO"
+      - "CONTROL CONTENCIÓN"
+
+  - code: AK
+    label: "controles ortopedia prequirúrgica"
+    source_column: AK
+    field: PRESTACION
+    operator: contains
+    values:
+      - "CONTROL PLACA ORTOP. PREQ."
+      - "CONTROL CONFORMADOR PREQ."
+      - "CONTROL TAPE LABIAL PREQ."
+
+  - code: AL
+    label: "instalaciones ortopedia"
+    source_column: AL
+    field: PRESTACION
+    operator: contains
+    values:
+      - "INSTALACIÓN PLACA ORTOP. PREQ."
+      - "INSTALACIÓN CONFORMADOR PREQ."
+      - "INSTALACIÓN TAPE LABIAL PREQ."
+      - "INSTALACIÓN CONFORMADOR NASAL POSTQ."
+      - "INSTALACIÓN PLACA OBTURADORA POSTQ."

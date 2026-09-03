@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -m pytest tests/test_medinet_analysis.py -q)",
+      "Bash(git checkout *)"
+    ]
+  }
+}

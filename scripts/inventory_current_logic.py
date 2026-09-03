@@ -889,9 +889,20 @@ def render_current_logic_doc(
     lines.append(f"> Archivo analizado: `{input_name}`  ")
     lines.append(f"> SHA256: `{sha256}`  ")
     lines.append(f"> Generado: {datetime.now(UTC).strftime('%Y-%m-%dT%H:%M:%SZ')}  ")
-    lines.append(f"> Hoja de detalle: `{detail_sheet}` ({data_rows} filas de datos)  ")
+    lines.append(f"> Hoja de detalle: `{detail_sheet}` ({data_rows} filas físicas)  ")
     lines.append(
         f"> Hojas output: {', '.join(f'`{s}`' for s in output_sheets) or '—'}"
+    )
+    lines.append("")
+    lines.append(
+        "> **Sobre los conteos:** las cifras de filas y fórmulas de este documento "
+        "corresponden a **filas físicas** de la hoja y **no deben interpretarse como "
+        "la cantidad de atenciones reales**. El workbook de referencia arrastra sus "
+        "fórmulas `AC:AL` más allá de las atenciones, por lo que puede haber filas "
+        "físicas sin datos. La detección de filas estructuralmente vacías "
+        "(`structural_empty_rows`) pertenece al análisis Medinet "
+        "(`remasep.services.medinet_analysis`); para el recuento real del dataset "
+        "consultar [`docs/MEDINET_ANALYSIS.md`](MEDINET_ANALYSIS.md)."
     )
     lines.append("")
 
@@ -985,7 +996,10 @@ def render_current_logic_doc(
             )
     else:
         lines.append("Sin advertencias: cada columna derivada tiene una única fórmula")
-        lines.append("normalizada y un `formula_count` igual a las filas de datos, sin huecos.")
+        lines.append(
+            f"normalizada y un `formula_count` igual a las {data_rows} filas físicas de "
+            "la hoja (no atenciones reales; ver nota inicial), sin huecos."
+        )
     lines.append("")
 
     # --- Observaciones que requieren validación funcional ---

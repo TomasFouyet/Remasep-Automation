@@ -1,7 +1,8 @@
 """Ventana principal: navegación por QStackedWidget + estado compartido.
 
-Maqueta funcional conectada a ``MockRemasepService``. No implementa lógica
-REMASEP real, no lee Excel, no toca datos de pacientes.
+El modo **demo** usa ``MockRemasepService`` (datos ficticios). El modo **real**
+usa ``MedinetAnalysisService`` sobre un archivo Medinet seleccionado. Ambos
+coexisten. No se genera REMASEP, no se usa COM ni macros.
 """
 
 from __future__ import annotations
@@ -13,6 +14,8 @@ from pathlib import Path
 
 from PySide6.QtWidgets import QApplication, QMainWindow, QStackedWidget, QWidget
 
+from remasep.core.errors import RemasepError
+from remasep.services.medinet_analysis import MedinetAnalysisResult, MedinetAnalysisService
 from remasep.services.mock_remasep import (
     AnalysisResult,
     MockRemasepService,
@@ -35,6 +38,10 @@ def _default_period() -> tuple[int, int]:
     return previous.month, previous.year
 
 
+ANALYSIS_MODE_DEMO = "DEMO"
+ANALYSIS_MODE_REAL = "REAL"
+
+
 @dataclass
 class AppState:
     month: int
@@ -43,15 +50,22 @@ class AppState:
     medinet_path: Path | None = None
     egresos_path: Path | None = None
     recursos_path: Path | None = None
-    analysis: AnalysisResult | None = None
+    analysis_mode: str = ""
+    analysis: AnalysisResult | None = None  # solo modo DEMO
+    medinet_analysis: MedinetAnalysisResult | None = None  # solo modo REAL
+    analysis_error: str | None = None
     exception_decisions: dict[str, str] = field(default_factory=dict)
 
     @property
     def period(self) -> Period:
         return Period(self.month, self.year)
 
+    @property
+    def is_real(self) -> bool:
+        return self.analysis_mode == ANALYSIS_MODE_REAL
+
     def review_outcome(self) -> ReviewOutcome | None:
-        """Proyección del análisis tras aplicar las decisiones de la sesión."""
+        """Proyección del análisis tras aplicar las decisiones de la sesión (solo DEMO)."""
         if self.analysis is None:
             return None
         return project_review(self.analysis, self.exception_decisions)
@@ -65,6 +79,7 @@ class MainWindow(QMainWindow):
         self.setStyleSheet(STYLESHEET)
 
         self.service = service or MockRemasepService()
+        self.medinet_service = MedinetAnalysisService()
         month, year = _default_period()
         self.state = AppState(month=month, year=year)
 
@@ -100,16 +115,37 @@ class MainWindow(QMainWindow):
 
     # --- acciones del flujo ---------------------------------------
 
-    def run_analysis(self) -> AnalysisResult:
-        self.state.analysis = self.service.analyze(
-            self.state.period,
-            demo=self.state.demo,
-            medinet_file=self.state.medinet_path,
-            egresos_file=self.state.egresos_path,
-            recursos_file=self.state.recursos_path,
-        )
+    def run_analysis(self) -> None:
+        """Ejecuta el análisis según haya archivo Medinet (REAL) o no (DEMO)."""
         self.state.exception_decisions = {}
-        return self.state.analysis
+        self.state.analysis = None
+        self.state.medinet_analysis = None
+        self.state.analysis_error = None
+
+        if self.state.demo or self.state.medinet_path is None:
+            self.state.analysis_mode = ANALYSIS_MODE_DEMO
+            self.state.analysis = self.service.analyze(
+                self.state.period,
+                demo=True,
+                medinet_file=self.state.medinet_path,
+                egresos_file=self.state.egresos_path,
+                recursos_file=self.state.recursos_path,
+            )
+            return
+
+        self.state.analysis_mode = ANALYSIS_MODE_REAL
+        try:
+            self.state.medinet_analysis = self.medinet_service.analyze(
+                self.state.medinet_path, self.state.period
+            )
+        except RemasepError as exc:
+            self.state.analysis_error = str(exc)
+
+    def start_analysis(self, *, demo: bool) -> str:
+        """Lanza el análisis y devuelve el nombre de la pantalla a mostrar."""
+        self.state.demo = demo
+        self.run_analysis()
+        return "analysis"
 
     def reset_flow(self) -> None:
         """Vuelve al inicio conservando el período elegido."""

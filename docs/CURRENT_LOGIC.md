@@ -4,9 +4,11 @@
 >
 > Archivo analizado: `GENERACION DATOS REMASEP.xlsx`  
 > SHA256: `fc2e153659041abc50d82d13a84b4a1209e776681257c75b2383328933d15b79`  
-> Generado: 2026-09-03T00:35:45Z  
-> Hoja de detalle: `Atenciones - Detalles de citas` (2006 filas de datos)  
+> Generado: 2026-09-03T14:07:15Z  
+> Hoja de detalle: `Atenciones - Detalles de citas` (2006 filas físicas)  
 > Hojas output: `REMASEP 01`, `B2 ANEXO`, `REMASEP_OD`
+
+> **Sobre los conteos:** las cifras de filas y fórmulas de este documento corresponden a **filas físicas** de la hoja y **no deben interpretarse como la cantidad de atenciones reales**. El workbook de referencia arrastra sus fórmulas `AC:AL` más allá de las atenciones, por lo que puede haber filas físicas sin datos. La detección de filas estructuralmente vacías (`structural_empty_rows`) pertenece al análisis Medinet (`remasep.services.medinet_analysis`); para el recuento real del dataset consultar [`docs/MEDINET_ANALYSIS.md`](MEDINET_ANALYSIS.md).
 
 ## Esquema de columnas
 
@@ -105,7 +107,7 @@ Una fila por condición observada en las columnas de clasificación (`EXACT_MAP`
 ## Invariantes / advertencias de análisis
 
 Sin advertencias: cada columna derivada tiene una única fórmula
-normalizada y un `formula_count` igual a las filas de datos, sin huecos.
+normalizada y un `formula_count` igual a las 2006 filas físicas de la hoja (no atenciones reales; ver nota inicial), sin huecos.
 
 ## Observaciones que requieren validación funcional
 

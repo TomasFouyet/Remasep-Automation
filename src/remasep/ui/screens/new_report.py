@@ -139,12 +139,8 @@ class NewReportScreen(QWidget):
 
     def _start_demo(self) -> None:
         self._sync_state()
-        self._app.state.demo = True
-        self._app.run_analysis()
-        self._app.navigate("analysis")
+        self._app.navigate(self._app.start_analysis(demo=True))
 
     def _start_real(self) -> None:
         self._sync_state()
-        self._app.state.demo = False
-        self._app.run_analysis()
-        self._app.navigate("analysis")
+        self._app.navigate(self._app.start_analysis(demo=False))

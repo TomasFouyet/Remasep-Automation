@@ -49,7 +49,10 @@ resultado del *discovery* técnico de Sprint 1 más una maqueta de UI navegable.
 
 ### Hoja de detalle (`Atenciones - Detalles de citas`)
 
-- 2.006 atenciones analizadas en el workbook de referencia.
+- 2.006 **filas físicas** en el workbook de referencia. El análisis de Sprint 2.1
+  confirmó que **1.364 son atenciones reales** (julio 2026); las otras 642 son
+  filas estructuralmente vacías con fórmulas `AC:AL` arrastradas más allá de las
+  atenciones. Ver [`docs/MEDINET_ANALYSIS.md`](docs/MEDINET_ANALYSIS.md).
 - 10 columnas derivadas `AC:AL`, con 1 patrón de fórmula por columna
   (todas las filas replican la misma fórmula).
 - 27 reglas candidatas extraídas de las columnas de clasificación

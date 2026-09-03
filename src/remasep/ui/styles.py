@@ -102,6 +102,27 @@ QLabel[pill="pending"] {{
     font-weight: 600;
 }}
 
+QLabel[badge="real"] {{
+    background: #e6effd;
+    color: {ACCENT_DARK};
+    border: 1px solid #c3d7f7;
+    border-radius: 4px;
+    padding: 3px 10px;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 1px;
+}}
+QLabel[badge="demo"] {{
+    background: {WARNING_BG};
+    color: {WARNING};
+    border: 1px solid #f0dca0;
+    border-radius: 4px;
+    padding: 3px 10px;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 1px;
+}}
+
 QComboBox, QSpinBox {{
     background: {SURFACE};
     border: 1px solid {BORDER};
