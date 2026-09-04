@@ -250,9 +250,14 @@ class AggregationFormula:
         return sum(term.count(rows) for term in self.terms)
 
 
-def _resolve_criterion_expr(expr: str, resolve_ref: Callable[[str], object]) -> str:
+def _resolve_criterion_expr(
+    expr: str, resolve_ref: Callable[[str], object]
+) -> tuple[str, tuple[str, ...]]:
+    """Resuelve un criterio ``"..."[&$A1&...]`` a texto; devuelve también las
+    referencias de celda usadas **como criterio** (no son dependencias de valor)."""
     parts = _split_top_level(expr.strip(), "&")
     resolved: list[str] = []
+    criterion_refs: list[str] = []
     for part in parts:
         token = part.strip()
         if len(token) >= 2 and token[0] == '"' and token[-1] == '"':
@@ -262,14 +267,15 @@ def _resolve_criterion_expr(expr: str, resolve_ref: Callable[[str], object]) -> 
             if value is None:
                 raise UnsupportedFormulaError(f"referencia de criterio sin valor: {token}")
             resolved.append(str(value))
+            criterion_refs.append(token.replace("$", "").upper())
         else:
             raise UnsupportedFormulaError(f"parte de criterio no soportada: {token!r}")
-    return "".join(resolved)
+    return "".join(resolved), tuple(criterion_refs)
 
 
 def _parse_count_call(
     func: str, content: str, detail_sheet: str, resolve_ref: Callable[[str], object]
-) -> CountTerm:
+) -> tuple[CountTerm, tuple[str, ...]]:
     args = [a.strip() for a in _split_top_level(content, ",")]
     if func.upper() == "COUNTIF" and len(args) != 2:
         raise UnsupportedFormulaError("COUNTIF con un nº de argumentos inesperado")
@@ -277,11 +283,13 @@ def _parse_count_call(
         raise UnsupportedFormulaError("COUNTIFS con un nº de argumentos impar")
 
     pairs: list[tuple[str, Criterion]] = []
+    criterion_refs: list[str] = []
     for i in range(0, len(args), 2):
         column = _parse_range(args[i], detail_sheet)
-        criterion = build_criterion(_resolve_criterion_expr(args[i + 1], resolve_ref))
-        pairs.append((column, criterion))
-    return CountTerm(tuple(pairs))
+        text, refs = _resolve_criterion_expr(args[i + 1], resolve_ref)
+        pairs.append((column, build_criterion(text)))
+        criterion_refs.extend(refs)
+    return CountTerm(tuple(pairs)), tuple(criterion_refs)
 
 
 def _parse_range(range_expr: str, detail_sheet: str) -> str:
@@ -328,7 +336,7 @@ def parse_aggregation_formula(
         content, end = _call_content(term_text, match.end() - 1)
         if term_text[end + 1 :].strip():
             raise UnsupportedFormulaError("hay contenido tras el COUNTIF(S)")
-        term = _parse_count_call(match.group(1), content, detail_sheet, resolve_ref)
+        term, _refs = _parse_count_call(match.group(1), content, detail_sheet, resolve_ref)
         terms.append(term)
         columns.extend(column for column, _ in term.pairs)
 
@@ -337,6 +345,210 @@ def parse_aggregation_formula(
 
     ordered_columns = tuple(sorted(set(columns)))
     return AggregationFormula(tuple(terms), ordered_columns)
+
+
+# ---------------------------------------------------------------------------
+# Fórmulas derivadas — aritmética (+/-) entre agregaciones y celdas agregadas
+# ---------------------------------------------------------------------------
+
+_VALUE_CELL_REF_RE = re.compile(r"^\$?([A-Za-z]{1,3})\$?([0-9]+)$")
+
+# Funciones que denotan una comprobación/validación, no una agregación.
+_VALIDATION_FUNCS = frozenset(
+    {"IF", "IFS", "AND", "OR", "NOT", "IFERROR", "IFNA", "ISBLANK", "ISERROR", "ISNA"}
+)
+
+
+def _split_signed_terms(text: str) -> list[tuple[int, str]]:
+    """Parte una expresión en términos ``(signo, texto)`` separados por ``+``/``-``
+    de nivel superior (respeta strings y paréntesis). El signo inicial es ``+``."""
+    terms: list[tuple[int, str]] = []
+    buf: list[str] = []
+    sign = 1
+    depth = 0
+    in_str = False
+    i = 0
+    while i < len(text):
+        ch = text[i]
+        if in_str:
+            buf.append(ch)
+            if ch == '"':
+                if i + 1 < len(text) and text[i + 1] == '"':
+                    buf.append('"')
+                    i += 2
+                    continue
+                in_str = False
+        elif ch == '"':
+            in_str = True
+            buf.append(ch)
+        elif ch in "([{":
+            depth += 1
+            buf.append(ch)
+        elif ch in ")]}":
+            depth -= 1
+            buf.append(ch)
+        elif depth == 0 and ch in "+-":
+            term = "".join(buf).strip()
+            if term:
+                terms.append((sign, term))
+                buf = []
+                sign = 1 if ch == "+" else -1
+            else:
+                sign = sign * (1 if ch == "+" else -1)
+        else:
+            buf.append(ch)
+        i += 1
+    last = "".join(buf).strip()
+    if last:
+        terms.append((sign, last))
+    return terms
+
+
+def arithmetic_constructs(formula: str) -> tuple[str, ...]:
+    """Constructs aritméticos presentes en la fórmula, como etiquetas estables
+    (``function:SUM``, ``operator:*``, ``grouping_parens``). ``COUNTIF``/``COUNTIFS``
+    y los operadores ``+``/``-`` **no** se reportan (sí están soportados)."""
+    body = formula.strip()
+    body = body.removeprefix("=")
+    nostr = re.sub(r'"(?:[^"]|"")*"', "", body)
+    found: list[str] = []
+    for match in re.finditer(r"(?<![A-Za-z0-9_.])(?:_xl\w+\.)?([A-Za-z][A-Za-z0-9_.]*)\s*\(", nostr):
+        name = match.group(1).upper()
+        if name in ("COUNTIF", "COUNTIFS"):
+            continue
+        found.append(f"function:{name}")
+    depth = 0
+    for idx, ch in enumerate(nostr):
+        if ch == "(":
+            prev = nostr[:idx].rstrip()
+            if depth == 0 and not (prev and (prev[-1].isalnum() or prev[-1] in "._")):
+                found.append("grouping_parens")
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+        elif depth == 0 and ch == "*":
+            found.append("operator:*")
+        elif depth == 0 and ch == "/":
+            found.append("operator:/")
+        elif depth == 0 and ch == "&":
+            found.append("operator:&")
+    return tuple(dict.fromkeys(found))
+
+
+@dataclass(frozen=True)
+class DerivedFormula:
+    """``=Σ COUNTIF(S)(...)  ±  celdas agregadas  ±  literales`` (solo ``+``/``-``).
+
+    - ``count_terms``: agregaciones sobre la hoja de detalle (con su signo);
+    - ``value_refs``: referencias de celda usadas **como valor** → dependencias
+      del grafo (``(signo, coord)``);
+    - ``literals``: constantes numéricas (``(signo, valor)``);
+    - ``criterion_refs``: referencias usadas **como criterio** dentro de un
+      ``COUNTIF(S)`` (se resuelven a texto, **no** son dependencias de valor).
+    """
+
+    count_terms: tuple[tuple[int, CountTerm], ...]
+    value_refs: tuple[tuple[int, str], ...]
+    literals: tuple[tuple[int, float], ...]
+    referenced_columns: tuple[str, ...]
+    criterion_refs: tuple[str, ...]
+
+    @property
+    def base_call_count(self) -> int:
+        return len(self.count_terms)
+
+    @property
+    def is_pure_aggregation(self) -> bool:
+        return bool(self.count_terms) and not self.value_refs and not self.literals
+
+    @property
+    def is_derived_aggregation(self) -> bool:
+        return bool(self.count_terms) and bool(self.value_refs or self.literals)
+
+    @property
+    def depends_on_age_local(self) -> bool:
+        return AGE_COLUMN in self.referenced_columns
+
+    @property
+    def value_ref_coords(self) -> tuple[str, ...]:
+        return tuple(dict.fromkeys(coord for _sign, coord in self.value_refs))
+
+    def evaluate(
+        self, rows: Sequence[Mapping[str, object]], value_lookup: Mapping[str, float]
+    ) -> int | float:
+        total: float = 0.0
+        for sign, term in self.count_terms:
+            total += sign * term.count(rows)
+        for sign, coord in self.value_refs:
+            if coord not in value_lookup:
+                raise UnsupportedFormulaError(f"referencia de valor sin resolver: {coord}")
+            total += sign * value_lookup[coord]
+        for sign, literal in self.literals:
+            total += sign * literal
+        return int(total) if float(total).is_integer() else total
+
+
+def parse_derived_formula(
+    formula: str,
+    detail_sheet: str,
+    resolve_ref: Callable[[str], object],
+) -> DerivedFormula:
+    """Parsea ``=COUNTIF(S)(...) ± celda ± ...`` (solo ``+``/``-``).
+
+    Lanza :class:`UnsupportedFormulaError` ante ``* / & SUM IF``, paréntesis de
+    agrupación aritmética, rangos como valor o cualquier otra función.
+    """
+    body = formula.strip()
+    if body.startswith("="):
+        body = body[1:].strip()
+    if body.startswith("(") and body.endswith(")"):
+        inner, end = _call_content(body, 0)
+        if end == len(body) - 1:
+            body = inner.strip()
+
+    bad = arithmetic_constructs("=" + body)
+    if bad:
+        raise UnsupportedFormulaError("construct aritmético no soportado: " + ", ".join(bad))
+
+    count_terms: list[tuple[int, CountTerm]] = []
+    value_refs: list[tuple[int, str]] = []
+    literals: list[tuple[int, float]] = []
+    columns: list[str] = []
+    criterion_refs: list[str] = []
+
+    for sign, raw_term in _split_signed_terms(body):
+        term_text = raw_term.strip()
+        if not term_text:
+            raise UnsupportedFormulaError("término aritmético vacío")
+        match = _COUNT_CALL_RE.match(term_text)
+        if match:
+            content, end = _call_content(term_text, match.end() - 1)
+            if term_text[end + 1 :].strip():
+                raise UnsupportedFormulaError("hay contenido tras el COUNTIF(S)")
+            term, refs = _parse_count_call(match.group(1), content, detail_sheet, resolve_ref)
+            count_terms.append((sign, term))
+            columns.extend(column for column, _ in term.pairs)
+            criterion_refs.extend(refs)
+            continue
+        if _VALUE_CELL_REF_RE.match(term_text):
+            value_refs.append((sign, term_text.replace("$", "").upper()))
+            continue
+        number = _to_number(term_text)
+        if number is not None:
+            literals.append((sign, number))
+            continue
+        raise UnsupportedFormulaError(f"término aritmético no soportado: {term_text[:40]!r}")
+
+    if not count_terms and not value_refs:
+        raise UnsupportedFormulaError("sin términos evaluables")
+
+    return DerivedFormula(
+        tuple(count_terms),
+        tuple(value_refs),
+        tuple(literals),
+        tuple(sorted(set(columns))),
+        tuple(dict.fromkeys(criterion_refs)),
+    )
 
 
 # ---------------------------------------------------------------------------
