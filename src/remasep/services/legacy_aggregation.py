@@ -552,6 +552,320 @@ def parse_derived_formula(
 
 
 # ---------------------------------------------------------------------------
+# SUM downstream (Sprint 2.4/2.5) — ``Σ SUM(...) ± celda ± literal``
+# ---------------------------------------------------------------------------
+
+_SUM_CALL_RE = re.compile(r"(?i)(?<![A-Za-z0-9_.])(?:_xl\w+\.)?(SUM)\s*\(")
+_RANGE_CELL_RE = re.compile(r"^\$?([A-Za-z]{1,3})\$?([0-9]+):\$?([A-Za-z]{1,3})\$?([0-9]+)$")
+_MAX_SUM_RANGE_CELLS = 5000
+
+
+def _col_to_index(col: str) -> int:
+    index = 0
+    for ch in col.upper():
+        index = index * 26 + (ord(ch) - 64)
+    return index
+
+
+def _index_to_col(index: int) -> str:
+    letters = ""
+    while index > 0:
+        index, remainder = divmod(index - 1, 26)
+        letters = chr(65 + remainder) + letters
+    return letters
+
+
+def _expand_rectangular_range(match: re.Match[str]) -> tuple[str, ...]:
+    col1, row1, col2, row2 = match.group(1), int(match.group(2)), match.group(3), int(match.group(4))
+    col_start, col_end = sorted((_col_to_index(col1), _col_to_index(col2)))
+    row_start, row_end = sorted((row1, row2))
+    if (col_end - col_start + 1) * (row_end - row_start + 1) > _MAX_SUM_RANGE_CELLS:
+        raise UnsupportedFormulaError("rango SUM demasiado grande para expandir")
+    return tuple(
+        f"{_index_to_col(col)}{row}"
+        for row in range(row_start, row_end + 1)
+        for col in range(col_start, col_end + 1)
+    )
+
+
+def _parse_sum_content(content: str) -> tuple[str, ...]:
+    text = content.strip()
+    if not text:
+        raise UnsupportedFormulaError("SUM sin argumentos")
+    if "!" in text:
+        raise UnsupportedFormulaError("SUM con referencia a otra hoja no soportado")
+    match = _RANGE_CELL_RE.match(text)
+    if match:
+        return _expand_rectangular_range(match)
+    coords: list[str] = []
+    for sign, token in _split_signed_terms(text):
+        if sign < 0:
+            raise UnsupportedFormulaError("SUM con resta interna no soportado")
+        token = token.strip()
+        if not _VALUE_CELL_REF_RE.match(token):
+            raise UnsupportedFormulaError(f"argumento de SUM no soportado: {token[:40]!r}")
+        coords.append(token.replace("$", "").upper())
+    if not coords:
+        raise UnsupportedFormulaError("SUM sin celdas")
+    return tuple(coords)
+
+
+@dataclass(frozen=True)
+class SumFormula:
+    """``=Σ SUM(rango o cadena de celdas) ± celda ± literal`` (solo ``+``/``-``).
+
+    Cada ``SUM(...)`` observado en el workbook real es, o bien un rango
+    rectangular de la misma hoja (``SUM(Q86:Q92)``), o bien una cadena de
+    celdas individuales unidas con ``+`` (``SUM(F40+H40+...+AL40)``). No se
+    admite resta dentro del `SUM`, referencias a otra hoja ni más de un
+    argumento — no observados en el workbook de referencia.
+    """
+
+    sum_terms: tuple[tuple[int, tuple[str, ...]], ...]
+    value_refs: tuple[tuple[int, str], ...]
+    literals: tuple[tuple[int, float], ...]
+
+    @property
+    def value_ref_coords(self) -> tuple[str, ...]:
+        coords: list[str] = []
+        for _sign, cells in self.sum_terms:
+            coords.extend(cells)
+        coords.extend(coord for _sign, coord in self.value_refs)
+        return tuple(dict.fromkeys(coords))
+
+    def evaluate(self, value_lookup: Mapping[str, object]) -> int | float:
+        total = 0.0
+        for sign, cells in self.sum_terms:
+            for coord in cells:
+                if coord not in value_lookup:
+                    raise UnsupportedFormulaError(f"referencia de valor sin resolver: {coord}")
+                number = _coerce_number(value_lookup[coord])
+                total += sign * (number if number is not None else 0.0)
+        for sign, coord in self.value_refs:
+            if coord not in value_lookup:
+                raise UnsupportedFormulaError(f"referencia de valor sin resolver: {coord}")
+            number = _coerce_number(value_lookup[coord])
+            total += sign * (number if number is not None else 0.0)
+        for sign, literal in self.literals:
+            total += sign * literal
+        return int(total) if float(total).is_integer() else total
+
+
+def parse_sum_formula(formula: str) -> SumFormula:
+    """Parsea ``=SUM(...) ± celda ± ...`` (solo ``+``/``-``, sin ``eval()``).
+
+    Lanza :class:`UnsupportedFormulaError` ante cualquier otro construct:
+    ``* / &``, paréntesis de agrupación, otra función, rango no rectangular,
+    referencia a otra hoja o resta dentro del `SUM`.
+    """
+    body = formula.strip()
+    if body.startswith("="):
+        body = body[1:].strip()
+    if body.startswith("(") and body.endswith(")"):
+        inner, end = _call_content(body, 0)
+        if end == len(body) - 1:
+            body = inner.strip()
+
+    sum_terms: list[tuple[int, tuple[str, ...]]] = []
+    value_refs: list[tuple[int, str]] = []
+    literals: list[tuple[int, float]] = []
+
+    for sign, raw_term in _split_signed_terms(body):
+        term_text = raw_term.strip()
+        if not term_text:
+            raise UnsupportedFormulaError("término aritmético vacío")
+        match = _SUM_CALL_RE.match(term_text)
+        if match:
+            content, end = _call_content(term_text, match.end() - 1)
+            if term_text[end + 1 :].strip():
+                raise UnsupportedFormulaError("hay contenido tras el SUM")
+            sum_terms.append((sign, _parse_sum_content(content)))
+            continue
+        if _VALUE_CELL_REF_RE.match(term_text):
+            value_refs.append((sign, term_text.replace("$", "").upper()))
+            continue
+        number = _to_number(term_text)
+        if number is not None:
+            literals.append((sign, number))
+            continue
+        raise UnsupportedFormulaError(f"término aritmético no soportado: {term_text[:40]!r}")
+
+    if not sum_terms and not value_refs:
+        raise UnsupportedFormulaError("sin términos SUM evaluables")
+
+    return SumFormula(tuple(sum_terms), tuple(value_refs), tuple(literals))
+
+
+# ---------------------------------------------------------------------------
+# IF validation (Sprint 2.5) — comprobaciones legacy, no métricas clínicas
+# ---------------------------------------------------------------------------
+
+_IF_CALL_RE = re.compile(r"(?i)(?<![A-Za-z0-9_.])(?:_xl\w+\.)?(IF)\s*\(")
+_IF_OPERATORS = ("<>", "<=", ">=", "<", ">", "=")
+
+
+@dataclass(frozen=True)
+class IfOperand:
+    """Un lado de la condición de un ``IF``: celda, número o texto literal."""
+
+    kind: str  # "CELL" | "NUM" | "STR"
+    coord: str | None = None
+    number: float | None = None
+    text: str | None = None
+
+
+@dataclass(frozen=True)
+class IfBranch:
+    """Rama ``then``/``else`` de un ``IF``: literal, celda o `IF` anidado."""
+
+    kind: str  # "NUM" | "STR" | "CELL" | "NESTED"
+    number: float | None = None
+    text: str | None = None
+    coord: str | None = None
+    nested: IfFormula | None = None
+
+    @property
+    def value_ref_coords(self) -> tuple[str, ...]:
+        if self.kind == "CELL":
+            return (self.coord,) if self.coord else ()
+        if self.kind == "NESTED" and self.nested is not None:
+            return self.nested.value_ref_coords
+        return ()
+
+    def resolve(self, value_lookup: Mapping[str, object]) -> object:
+        if self.kind == "NUM":
+            return self.number
+        if self.kind == "STR":
+            return self.text
+        if self.kind == "CELL":
+            if self.coord not in value_lookup:
+                raise UnsupportedFormulaError(f"referencia de valor sin resolver: {self.coord}")
+            return value_lookup[self.coord]
+        assert self.nested is not None
+        return self.nested.evaluate(value_lookup)
+
+
+def _operand_value(operand: IfOperand, value_lookup: Mapping[str, object]) -> object:
+    if operand.kind == "NUM":
+        return operand.number
+    if operand.kind == "STR":
+        return operand.text
+    if operand.coord not in value_lookup:
+        raise UnsupportedFormulaError(f"referencia de valor sin resolver: {operand.coord}")
+    return value_lookup[operand.coord]
+
+
+def _evaluate_if_condition(
+    left_operand: IfOperand, operator: str, right_operand: IfOperand, value_lookup: Mapping[str, object]
+) -> bool:
+    left_value = _operand_value(left_operand, value_lookup)
+    right_value = _operand_value(right_operand, value_lookup)
+    text_mode = operator in ("=", "<>") and (left_operand.kind == "STR" or right_operand.kind == "STR")
+    if text_mode:
+        equal = normalize_legacy_text(left_value) == normalize_legacy_text(right_value)
+        return equal if operator == "=" else not equal
+    left_number = _coerce_number(left_value)
+    right_number = _coerce_number(right_value)
+    if left_number is None or right_number is None:
+        raise UnsupportedFormulaError("condición IF no numérica ni de texto reconocible")
+    return _compare_numeric(left_number, operator, right_number)
+
+
+@dataclass(frozen=True)
+class IfFormula:
+    """``=IF(izquierda OP derecha, entonces, si_no)``, con ``entonces``/``si_no``
+    literales, referencias de celda o un ``IF`` anidado (la única composición
+    observada en el workbook real)."""
+
+    left: IfOperand
+    operator: str
+    right: IfOperand
+    then_branch: IfBranch
+    else_branch: IfBranch
+
+    @property
+    def value_ref_coords(self) -> tuple[str, ...]:
+        coords: list[str] = []
+        for operand in (self.left, self.right):
+            if operand.kind == "CELL" and operand.coord:
+                coords.append(operand.coord)
+        coords.extend(self.then_branch.value_ref_coords)
+        coords.extend(self.else_branch.value_ref_coords)
+        return tuple(dict.fromkeys(coords))
+
+    def evaluate(self, value_lookup: Mapping[str, object]) -> object:
+        condition = _evaluate_if_condition(self.left, self.operator, self.right, value_lookup)
+        branch = self.then_branch if condition else self.else_branch
+        result = branch.resolve(value_lookup)
+        if isinstance(result, float) and result.is_integer():
+            return int(result)
+        return result
+
+
+def _parse_if_operand(token: str) -> IfOperand:
+    token = token.strip()
+    if len(token) >= 2 and token[0] == '"' and token[-1] == '"':
+        return IfOperand("STR", text=_unquote(token))
+    if _VALUE_CELL_REF_RE.match(token):
+        return IfOperand("CELL", coord=token.replace("$", "").upper())
+    number = _to_number(token)
+    if number is not None:
+        return IfOperand("NUM", number=number)
+    raise UnsupportedFormulaError(f"operando IF no soportado: {token[:40]!r}")
+
+
+def _parse_if_condition(condition: str) -> tuple[IfOperand, str, IfOperand]:
+    masked = re.sub(r'"(?:[^"]|"")*"', lambda m: " " * len(m.group(0)), condition)
+    for operator in _IF_OPERATORS:
+        index = masked.find(operator)
+        if index != -1:
+            left = _parse_if_operand(condition[:index])
+            right = _parse_if_operand(condition[index + len(operator) :])
+            return left, operator, right
+    raise UnsupportedFormulaError(f"condición IF sin operador reconocido: {condition[:40]!r}")
+
+
+def _parse_if_branch(token: str) -> IfBranch:
+    token = token.strip()
+    if _IF_CALL_RE.match(token):
+        return IfBranch("NESTED", nested=parse_if_formula(token))
+    if len(token) >= 2 and token[0] == '"' and token[-1] == '"':
+        return IfBranch("STR", text=_unquote(token))
+    if _VALUE_CELL_REF_RE.match(token):
+        return IfBranch("CELL", coord=token.replace("$", "").upper())
+    number = _to_number(token)
+    if number is not None:
+        return IfBranch("NUM", number=number)
+    raise UnsupportedFormulaError(f"resultado IF no soportado: {token[:40]!r}")
+
+
+def parse_if_formula(formula: str) -> IfFormula:
+    """Parsea ``=IF(izq OP der, entonces, si_no)`` (``IF`` anidado permitido en
+    una rama). Operadores soportados: ``= <> < <= > >=``. Sin ``eval()``.
+
+    Lanza :class:`UnsupportedFormulaError` ante cualquier otra forma: más de un
+    `IF` en la condición, funciones no soportadas, resultado que no sea
+    literal/celda/`IF` anidado, etc.
+    """
+    body = formula.strip()
+    if body.startswith("="):
+        body = body[1:].strip()
+    match = _IF_CALL_RE.match(body)
+    if not match:
+        raise UnsupportedFormulaError("no es una fórmula IF")
+    content, end = _call_content(body, match.end() - 1)
+    if body[end + 1 :].strip():
+        raise UnsupportedFormulaError("hay contenido tras el IF")
+    args = [a.strip() for a in _split_top_level(content, ",")]
+    if len(args) != 3:
+        raise UnsupportedFormulaError("IF con un nº de argumentos distinto de 3")
+    left, operator, right = _parse_if_condition(args[0])
+    then_branch = _parse_if_branch(args[1])
+    else_branch = _parse_if_branch(args[2])
+    return IfFormula(left, operator, right, then_branch, else_branch)
+
+
+# ---------------------------------------------------------------------------
 # Sensibilidad al padding (filas estructuralmente vacías)
 # ---------------------------------------------------------------------------
 

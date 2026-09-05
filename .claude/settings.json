@@ -21,7 +21,11 @@
       "Bash(python scripts/compare_legacy_aggregations.py \"data/local/GENERACION DATOS REMASEP.xlsx\")",
       "Bash(python scripts/close_legacy_aggregations.py \"data/local/GENERACION DATOS REMASEP.xlsx\")",
       "Bash(python -m pytest tests/test_legacy_aggregation_closure.py -q)",
-      "Bash(python -m pytest tests/test_close_legacy_aggregations.py -q)"
+      "Bash(python -m pytest tests/test_close_legacy_aggregations.py -q)",
+      "Bash(time python scripts/evaluate_legacy_downstream.py \"data/local/GENERACION DATOS REMASEP.xlsx\")",
+      "Bash(python -m pytest tests/test_legacy_downstream_parsers.py -q)",
+      "Bash(python -m pytest tests/test_evaluate_legacy_downstream.py -q)",
+      "Bash(python scripts/evaluate_legacy_downstream.py \"data/local/GENERACION DATOS REMASEP.xlsx\")"
     ]
   }
 }

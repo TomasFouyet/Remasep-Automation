@@ -112,6 +112,11 @@ class Node:
     evaluation_supported: bool = False
     status: str = STATUS_OK
     notes: str = ""
+    # Vocabulario unificado de Sprint 2.5 (SUPPORTED / DEPENDENCY_UNAVAILABLE /
+    # UNSUPPORTED_SUM / UNSUPPORTED_IF / UNSUPPORTED_FORMULA / CYCLE). Vacío
+    # hasta que `evaluate_legacy_downstream.evaluate_full_closure` lo completa;
+    # Sprint 2.4 sigue usando `evaluation_supported`/`status` sin cambios.
+    evaluation_status: str = ""
 
     @property
     def key(self) -> tuple[str, str]:
@@ -140,6 +145,12 @@ class ClosureResult:
     cycle_nodes: list[tuple[str, str]]
     missing_dependencies: list[tuple[str, str, str]]
     generated_at: str
+    # Orden topológico (Kahn) sobre TODO el grafo Medinet (no solo BASE/DERIVED) y
+    # valores cacheados por hoja — expuestos para que Sprint 2.5 (SUM/IF) evalúe
+    # DOWNSTREAM_TOTAL/VALIDATION en el mismo orden usado para `depends_on_age`,
+    # sin recalcular el grafo ni volver a abrir el workbook.
+    topo_order: list[tuple[str, str]] = field(default_factory=list)
+    cached: dict[str, dict[str, object]] = field(default_factory=dict)
 
     def medinet_nodes(self) -> list[Node]:
         return [n for n in self.nodes.values() if n.medinet]
@@ -524,6 +535,8 @@ def close_legacy_aggregations(path: str | Path) -> ClosureResult:
         cycle_nodes=[*cyclic, *(k for k in eval_cyclic if k not in cyclic)],
         missing_dependencies=missing,
         generated_at=datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        topo_order=order,
+        cached=cached,
     )
 
 
