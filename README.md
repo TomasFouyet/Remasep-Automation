@@ -1,277 +1,223 @@
 # REMASEP Automation
 
-Aplicación desktop **local** para automatizar la preparación mensual del REMASEP de
-Fundación Gantz a partir de fuentes institucionales: **Medinet**, **egresos
-hospitalarios** y **datos de recursos / pabellones**.
+Aplicación de escritorio **local** para automatizar la preparación mensual del
+reporte **REMASEP** de Fundación Gantz, hoy elaborado a mano en Excel a partir de
+fuentes operacionales (**Medinet**, **egresos hospitalarios**, **tabla
+quirúrgica / recursos de pabellón**).
 
-El objetivo final es reemplazar el proceso manual actual —que hoy toma varias horas—
-por un flujo guiado: **cargar fuentes → validar → revisar excepciones → generar el
-workbook oficial**.
+El objetivo es reemplazar un proceso manual de varias horas por un flujo guiado:
+**cargar fuentes → validar → revisar excepciones → generar el workbook oficial**.
 
-Este repositorio todavía **no** contiene reglas clínicas/REMASEP validadas ni un
-mapping confirmado hacia las celdas del formulario oficial. Lo que existe hoy es el
-resultado del *discovery* técnico de Sprint 1 más una maqueta de UI navegable.
-
----
-
-## 1. Estado actual del proyecto
-
-**Estado:** *Discovery técnico completado + UI shell funcional.*
-
-- [x] Arquitectura base
-- [x] Ingeniería inversa del workbook actual (Sprint 1.1)
-- [x] Dependencias de fórmulas (Sprint 1.2)
-- [x] Inventario de la lógica actual (Sprint 1.3)
-- [x] Inventario de la plantilla oficial `REMASEP 2026 V1.4` (Sprint 1.4)
-- [x] Alineación preliminar generador ↔ plantilla oficial (Sprint 1.4)
-- [x] UI navegable con datos mock (UI Sprint 1)
-- [ ] Análisis real de Medinet
-- [ ] Equivalencia Python ↔ workbook legacy
-- [ ] Mapping semántico hacia la plantilla oficial
-- [ ] Integración Excel COM
-- [ ] Integración de egresos
-- [ ] Integración de recursos / pabellones
-- [ ] Generación oficial
-- [ ] CONTROL
-- [ ] Empaquetado `.exe`
+> El sistema **todavía no genera el REMASEP final**. Lo que existe es la
+> ingeniería inversa completa del workbook actual y la demostración de que su
+> lógica de fórmulas derivada de Medinet es reproducible en Python. El mapping
+> hacia la plantilla oficial MINSAL y la escritura en Excel **no** están
+> implementados.
 
 ---
 
-## 2. Hallazgos principales de Sprint 1
+## Objetivo
 
-> Resumen. El detalle completo (CSV + diagramas) vive en `docs/` y en
-> `artifacts/` tras ejecutar los scripts de inventario.
-
-### Workbook generador — `data/local/GENERACION DATOS REMASEP.xlsx`
-
-- 4 hojas: `REMASEP 01`, `B2 ANEXO`, `REMASEP_OD`, `Atenciones - Detalles de citas`.
-- 22.642 fórmulas · 39 patrones de fórmula · 0 named ranges.
-
-### Hoja de detalle (`Atenciones - Detalles de citas`)
-
-- 2.006 **filas físicas** en el workbook de referencia. El análisis de Sprint 2.1
-  confirmó que **1.364 son atenciones reales** (julio 2026); las otras 642 son
-  filas estructuralmente vacías con fórmulas `AC:AL` arrastradas más allá de las
-  atenciones. Ver [`docs/MEDINET_ANALYSIS.md`](docs/MEDINET_ANALYSIS.md).
-- 10 columnas derivadas `AC:AL`, con 1 patrón de fórmula por columna
-  (todas las filas replican la misma fórmula).
-- 27 reglas candidatas extraídas de las columnas de clasificación
-  (`AG` 3, `AH` 4, `AI` 6, `AJ` 6, `AK` 3, `AL` 5).
-
-**Columnas raw usadas transitivamente por las hojas output (7):**
-`DIA CITA`, `FECHA NACIMIENTO`, `SEXO`, `SUCURSAL`, `ESPECIALIDAD`,
-`TIPO DE CITA`, `PRESTACIÓN`.
-
-**Transformaciones derivadas observadas:**
-
-| Col | Qué hace (técnico) |
-| --- | --- |
-| `AC` | `TIPO DE CITA` + `SUCURSAL` |
-| `AD` | `TIPO DE CITA` + `SEXO` |
-| `AE` | `PRESTACIÓN` + `ESPECIALIDAD` + `SEXO` |
-| `AF` | edad (a partir de fecha de cita y fecha de nacimiento) |
-| `AG` | consultas médicas |
-| `AH` | controles odontológicos de especialidad |
-| `AI` | evaluaciones odontológicas de especialidad |
-| `AJ` | controles ortodoncia |
-| `AK` | controles ortopedia |
-| `AL` | instalaciones ortopedia |
-
-> ⚠️ Estas reglas **reproducen el comportamiento del workbook actual** y están
-> **pendientes de validación funcional**. No son "reglas oficiales MINSAL".
-
-**Observaciones que requieren confirmación del responsable funcional:**
-
-- `ESTADO` existe pero no participa en ninguna dependencia hacia REMASEP.
-- `MODALIDAD` existe pero no participa; el flag presencial/telemedicina parece
-  derivarse de `TIPO DE CITA` + `SUCURSAL` (columna `AC`).
-- `PRESTACIÓN REALIZADA` existe pero no participa; las reglas usan `PRESTACIÓN`.
-
-Detalle: [`docs/CURRENT_LOGIC.md`](docs/CURRENT_LOGIC.md),
-[`docs/CURRENT_EXCEL_FLOW.md`](docs/CURRENT_EXCEL_FLOW.md).
+Automatizar la construcción del REMASEP mensual: leer las fuentes institucionales,
+validarlas y clasificarlas, calcular las métricas, mapearlas a la plantilla
+oficial `REMASEP 2026_V1.4.xlsm` y generarla en Windows vía Excel COM, con una
+verificación final en la hoja `CONTROL` — dejando al usuario sólo la revisión de
+excepciones.
 
 ---
 
-## 3. Plantilla oficial `REMASEP 2026 V1.4`
+## Estado actual
 
-- 11 hojas detectadas: `NOMBRE`, `REMASEP 01`, `URGENCIAS`, `REMASEP B1`,
-  `B2 ANEXO`, `REMASEP_OD`, `EyP_ET`, `TV_MI`, `SERV_SANGRE`, `CONTROL`, `MACROS`.
-- Contiene **VBA** (macros; no se ejecutan ni se interpretan en este proyecto).
-- 11.466 fórmulas.
-- `CONTROL` es el **verificador final** (única hoja sin protección).
-- Flujo interno observado: `B2 ANEXO` alimenta `REMASEP B1` y también `REMASEP 01`;
-  `NOMBRE` alimenta los encabezados de las hojas de formulario; `CONTROL` recibe
-  dependencias de varias hojas.
+| Fase | Contenido | Estado |
+| --- | --- | --- |
+| **1 — Reverse Engineering** | Inventario del workbook, dependencias, lógica legacy, plantilla oficial, UI shell | **COMPLETE** |
+| **2 — Medinet & Legacy Equivalence** | Ingesta Medinet real, `AC:AL`, agregaciones directas/derivadas, `SUM`/`IF` downstream | **COMPLETE** |
+| **3 — Semantic Metrics** | Inventario de métricas semánticas, modelo con *provenance* | **NEXT** |
+| **4 — Additional Sources / Complete Dataset** | Adaptador de egresos, cálculo de recursos, dataset golden | PENDING |
+| **5 — Official Template Mapping** | Mapping semántico → plantilla MINSAL | PENDING |
+| **6 — Excel Generation / CONTROL** | Escritura Excel COM (Windows), recálculo, `CONTROL` | PENDING |
+| **7 — Pilot / Packaging** | Piloto manual + automático en paralelo, `.exe` | PENDING |
 
-**Alineación generador ↔ plantilla** (por contenido de etiqueta, **no** por
-desplazamiento de coordenadas):
-
-- 230 candidatos `exact_label`.
-- 1.189 candidatos `ambiguous` (nunca se elige uno de forma automática).
-- El mapping definitivo será **semántico / estructural**, no posicional.
-
-> Los ~26.336 *input candidates* detectados son **candidatos estructurales**
-> (celdas desbloqueadas / con validación en hojas protegidas), **no** campos de
-> ingreso confirmados. Requieren validación humana.
-
-Detalle: [`docs/TEMPLATE_ALIGNMENT.md`](docs/TEMPLATE_ALIGNMENT.md).
+Fase 3 va precedida de un **pre-Sprint 3** de inventario de fuentes / golden
+dataset (ver [`docs/PROGRESS.md`](docs/PROGRESS.md)). Sprint 3 **no** está
+iniciado.
 
 ---
 
-## 4. Arquitectura
+## Capacidades demostradas
 
-```text
-EXTRACT
-    Medinet / Egresos / Recursos
-        ↓
-TRANSFORM
-    normalizar / validar / clasificar
-        ↓
-METRICS
-    tabla larga semántica
-        ↓
-MAP
-    métrica → destino según versión REMASEP
-        ↓
-LOAD
-    Excel oficial / recálculo / CONTROL / guardar
+- Lectura de un archivo **Medinet** real (detección de hoja por encabezados,
+  mapeo semántico, sin fuzzy).
+- Identificación de **filas estructuralmente vacías** (fórmulas arrastradas).
+- Cálculo de las transformaciones derivadas **`AC:AL`** exacto vs. el workbook.
+- Reproducción de **`COUNTIF` / `COUNTIFS`** (agregaciones directas).
+- **Agregaciones derivadas** (`COUNTIFS(...) − celda`) vía grafo de dependencias.
+- **DAG de dependencias** entre celdas agregadas (orden topológico, ciclos,
+  profundidad).
+- **`SUM` downstream** y **`IF` validations** evaluados sobre el mismo DAG.
+- **UI de escritorio** navegable (PySide6) con flujo completo.
+- Separación **DEMO / REAL** en la UI.
+
+Lo que **no** hace todavía: generar el REMASEP oficial, integrar egresos ni
+recursos, ni validar contra reglas oficiales MINSAL.
+
+---
+
+## Dataset de referencia
+
+`data/local/GENERACION DATOS REMASEP.xlsx`, hoja `Atenciones - Detalles de
+citas`, período **julio 2026** (SHA256 `fc2e1536…d15b79`):
+
+```
+physical_rows_examined = 2006
+structural_empty_rows  =  642
+real records           = 1364   (= 1364 válidos, 0 inválidos)
 ```
 
-Principios (ver [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)):
+> **Las 2006 filas físicas NO son 2006 atenciones.** Las atenciones reales de
+> julio 2026 son **1364**; las otras 642 son filas con las fórmulas `AC:AL`
+> arrastradas más allá de los datos.
 
-- La lógica de negocio **no** conoce coordenadas Excel (`G54`); el mapping por
-  versión traduce cada métrica semántica a una celda/rango.
+El export **Medinet original** exacto de julio 2026 sigue **pendiente** de
+obtener del cliente (se usó la hoja `Atenciones` del generador como sustituto).
+
+---
+
+## Cobertura legacy
+
+**2043 / 2043** celdas Medinet-dependientes conocidas son **evaluables**
+(`formula_support_status: PASS`):
+
+| Clasificación | Celdas |
+| --- | ---: |
+| `BASE_AGGREGATION` (`COUNTIF`/`COUNTIFS`) | 1325 |
+| `DERIVED_AGGREGATION` (`… − celda`) | 102 |
+| `DOWNSTREAM_TOTAL` (`SUM`) | 344 |
+| `VALIDATION` (`IF`) | 272 |
+| **Total** | **2043** |
+
+Universo = **1427 directas** (referencian `Atenciones`) + **616 transitivas**.
+**DAG: profundidad máxima 4 · ciclos 0 · dependencias faltantes 0.**
+
+---
+
+## Cache de Excel
+
+La equivalencia se compara contra el **valor cacheado** por Excel, no contra un
+recálculo. **No** se afirma "100 % equivalente a Excel". Se separan dos cosas:
+
+| Concepto | Resultado |
+| --- | --- |
+| **FORMULA SUPPORT** — ¿se pudo evaluar? | 2043 / 2043 → **PASS** |
+| **CACHE CONSISTENCY** — ¿coincide con la cache? | **DIFFERENCES** |
+
+| Estado de cache | Celdas |
+| --- | ---: |
+| `MATCH` | 1659 |
+| `CACHE_DIFFERENCE` | 248 |
+| `CACHE_UNAVAILABLE` | 136 |
+
+- **Las 248 diferencias dependen todas de `AF` (edad).** La cache de `AF` está
+  **obsoleta** en el workbook de referencia (Excel dejó `0` en 571 filas con
+  fechas válidas). Las diferencias se anotan; **no** se convierten en `MATCH`.
+- **Las 136 `CACHE_UNAVAILABLE`** son validaciones `IF` de resultado **texto**
+  para las que Excel no guardó ningún valor cacheado.
+
+Detalle: [`docs/LEGACY_DOWNSTREAM_EQUIVALENCE.md`](docs/LEGACY_DOWNSTREAM_EQUIVALENCE.md).
+
+---
+
+## Arquitectura
+
+```text
+EXTRACT    Medinet / Egresos / Recursos
+    ↓
+TRANSFORM  normalizar / validar / clasificar
+    ↓
+METRICS    tabla larga semántica (con provenance)
+    ↓
+MAP        métrica → celda/rango según versión REMASEP
+    ↓
+LOAD       Excel oficial / recálculo / CONTROL / guardar
+```
+
+- La lógica de negocio **no** conoce coordenadas Excel (`G54`).
 - Una prestación desconocida o una clasificación ambigua **bloquean** el
-  procesamiento (0 matches → bloquear · 1 → continuar · >1 → bloquear).
-- La plantilla MINSAL es el formato oficial de salida.
+  procesamiento (0 → bloquear · 1 → continuar · >1 → bloquear).
+- Linux para desarrollo/análisis/UI; Windows + Microsoft Excel sólo para la
+  generación oficial (COM).
 
-**Plataformas:**
-
-| Entorno | Uso |
-| --- | --- |
-| Ubuntu / Linux | desarrollo, reglas, tests, análisis, UI |
-| Windows + Microsoft Excel | integración COM y generación oficial final |
-
-No se usa LibreOffice como sustituto de Microsoft Excel para la validación final.
+Detalle: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) ·
+[`docs/TECHNICAL_OVERVIEW.md`](docs/TECHNICAL_OVERVIEW.md).
 
 ---
 
-## 5. UI actual (UI Sprint 1)
-
-Maqueta navegable en **PySide6**, conectada a `MockRemasepService` (datos ficticios).
-
-**Pantallas:** Home · Nuevo reporte · Análisis · Revisión · Resultado.
-
-```text
-HOME → Archivos → Análisis → Revisión → Resultado
-```
-
-Hoy:
-
-- Funciona en Ubuntu con PySide6; incluye un **modo demostración** para recorrer
-  todo el flujo sin archivos reales.
-- El selector de archivos registra nombre/tamaño pero **no procesa** Medinet real.
-- Las excepciones se pueden **resolver visualmente** durante la sesión; no hay
-  persistencia de reglas.
-- La pantalla de Resultado distingue **el resultado original del análisis** del
-  **estado posterior a la revisión** (proyección `ReviewOutcome` calculada a
-  partir de las decisiones de la sesión).
-- El botón **"Generar REMASEP" está deshabilitado** (requiere el motor de
-  procesamiento y la integración con Excel).
-
----
-
-## 6. Cómo ejecutar
-
-**Ubuntu:**
+## Desarrollo
 
 ```bash
+# Ubuntu / Linux
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install -e ".[dev]"
+
+# UI (maqueta navegable, datos mock)
 python -m remasep.main
-```
 
-**Tests y lint:**
-
-```bash
-pytest
-ruff check .
+# Tests y lint
+pytest            # 379 passed
+ruff check .      # limpio
 ```
 
 Los tests de UI configuran Qt en modo **offscreen** automáticamente
-(`tests/conftest.py`), por lo que no requieren display físico.
+(`tests/conftest.py`); no requieren display.
+
+Los scripts de ingeniería inversa (`scripts/*.py`) son de **solo lectura** y
+escriben a `artifacts/` (gitignored). Ejemplo:
+
+```bash
+python scripts/evaluate_legacy_downstream.py "data/local/GENERACION DATOS REMASEP.xlsx"
+```
 
 ---
 
-## 7. Estructura del repositorio
+## Estructura del repositorio
 
 ```text
 src/remasep/
-  adapters/        Medinet (preliminar), wrapper Excel COM (Windows)
-  core/            normalización, motor de reglas, agregación (tabla larga)
-  domain/          modelos
-  services/        mock_remasep.py  (datos ficticios para la UI)
-  ui/
-    screens/       home · new_report · analysis · exceptions · summary
-    components/     file_selector · status_card · step_indicator
-    main_window.py · styles.py
-
-scripts/           herramientas de ingeniería inversa (solo lectura)
-  inventory_workbook.py        Sprint 1.1
-  formula_refs.py              analizador de referencias A1
-  analyze_dependencies.py      Sprint 1.2
-  inventory_current_logic.py   Sprint 1.3
-  inventory_template.py        Sprint 1.4
-
-docs/              ARCHITECTURE · CURRENT_EXCEL_FLOW · CURRENT_LOGIC ·
-                   TEMPLATE_ALIGNMENT · ROADMAP · CLIENT_PENDING
-config/            plantillas de configuración versionada por REMASEP
-tests/
+  adapters/     medinet.py · excel_com.py (stub Windows)
+  core/         text.py (normalize_text / normalize_legacy_text) · rules.py · aggregation.py
+  domain/       models.py
+  services/     legacy_transform · legacy_rules · legacy_aggregation · medinet_analysis · mock_remasep
+  ui/           screens/ · components/ · main_window.py · styles.py
+scripts/        inventory_workbook · formula_refs · analyze_dependencies · inventory_current_logic
+                inventory_template · compare_legacy_derived · compare_legacy_aggregations
+                close_legacy_aggregations · evaluate_legacy_downstream
+config/         legacy_current_logic_2026/rules.yaml · plantillas versionadas
+docs/           ver docs/README.md
+tests/          workbooks sintéticos; sin data/local/
 ```
 
-Los artefactos generados por los scripts se escriben en `artifacts/` (gitignored).
+`data/` (archivos reales, con pacientes) y `artifacts/` están **gitignored**.
 
 ---
 
-## 8. Seguridad y privacidad
+## Seguridad y privacidad
 
-- **Procesamiento local.** Sin telemetría por defecto.
-- Los archivos reales viven en `data/` y están **gitignored**.
-- Las herramientas de ingeniería inversa se diseñaron para **no exportar valores
-  de pacientes**: solo fórmulas, metadatos, encabezados y estructura.
-- Los datos nominales no se incluyen en los inventarios.
-- Los logs futuros no deben contener RUT, nombre ni fecha de nacimiento
-  individuales.
+- Procesamiento **local**, sin telemetría.
+- Ninguna herramienta exporta PII: sólo fórmulas, coordenadas, metadatos y
+  **valores agregados**. `RecordProblem` referencia sólo `fila` / `campo` /
+  `error_code`.
 
 ---
 
-## 9. Siguiente paso — Sprint 2.1: Medinet Real Analysis MVP
+## Documentación
 
-Seleccionar un archivo Medinet **real** desde la UI y mostrar:
-
-- total de registros;
-- validación de estructura;
-- validación de período;
-- cálculo de edad;
-- clasificaciones legacy actuales (las 27 reglas candidatas);
-- warnings;
-- estadísticas reales del archivo.
-
-Todavía **no** generará el REMASEP oficial.
-
-Luego: equivalencia con el Excel legacy → mapping semántico → integración Excel
-COM → egresos / recursos → CONTROL.
-
----
-
-## 10. Documentación relacionada
+Índice completo: [`docs/README.md`](docs/README.md).
 
 | Documento | Para qué sirve |
 | --- | --- |
-| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Componentes y flujo Extract→Transform→Metrics→Map→Load |
-| [`docs/CURRENT_EXCEL_FLOW.md`](docs/CURRENT_EXCEL_FLOW.md) | Grafo de dependencias entre hojas del workbook generador (observado) |
-| [`docs/CURRENT_LOGIC.md`](docs/CURRENT_LOGIC.md) | Lógica actual de la hoja de detalle: columnas, transformaciones, reglas candidatas |
-| [`docs/TEMPLATE_ALIGNMENT.md`](docs/TEMPLATE_ALIGNMENT.md) | Estructura de la plantilla oficial y candidatos de alineación |
-| [`docs/ROADMAP.md`](docs/ROADMAP.md) | Plan por sprints |
-| [`docs/CLIENT_PENDING.md`](docs/CLIENT_PENDING.md) | Información pendiente de confirmar con Fundación Gantz / MINSAL |
+| [`docs/PROGRESS.md`](docs/PROGRESS.md) | Vista de estado por fases: completado · siguiente · pendiente |
+| [`docs/ROADMAP.md`](docs/ROADMAP.md) | Plan por sprints (sin fechas) |
+| [`docs/sprints/`](docs/sprints/README.md) | Un documento por sprint (0 → 2.5) |
+| [`docs/TECHNICAL_OVERVIEW.md`](docs/TECHNICAL_OVERVIEW.md) | Stack, fronteras, motor legacy, DAG, cache, fuentes de datos |
+| [`docs/CLIENT_PENDING.md`](docs/CLIENT_PENDING.md) | Preguntas funcionales resueltas y pendientes |
