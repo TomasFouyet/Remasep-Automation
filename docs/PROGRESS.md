@@ -1,8 +1,7 @@
 # Estado del proyecto
 
-Vista de estado a fecha del cierre documental (post Sprint 2.5, previo a integrar
-`develop` en `master`). Para el detalle por sprint ver
-[`docs/sprints/`](sprints/README.md).
+Vista de estado post Sprint 3.1 (inicio de la capa semántica). Para el detalle
+por sprint ver [`docs/sprints/`](sprints/README.md).
 
 ## Fases
 
@@ -10,7 +9,7 @@ Vista de estado a fecha del cierre documental (post Sprint 2.5, previo a integra
 | --- | --- | --- |
 | **1 — Reverse Engineering** | Inventario del workbook, dependencias, lógica legacy, plantilla oficial, UI shell | **COMPLETE** |
 | **2 — Medinet & Legacy Equivalence** | Ingesta Medinet real, `AC:AL`, agregaciones directas, cierre por dependencias, `SUM`/`IF` downstream | **COMPLETE** |
-| **3 — Semantic Metrics** | Inventario de métricas semánticas, modelo con *provenance* | **NEXT** (tras el pre-Sprint 3) |
+| **3 — Semantic Metrics** | Inventario semántico (3.1 ✅), dimensiones clínicas (3.2), modelo con *provenance* | **IN PROGRESS** |
 | **4 — Additional Sources / Complete Dataset** | Adaptador de egresos, cálculo de recursos, dataset golden | PENDING |
 | **5 — Official Template Mapping** | Mapping semántico generador/Medinet → plantilla MINSAL | PENDING |
 | **6 — Excel Generation / CONTROL** | Escritura vía Excel COM (Windows), recálculo, verificación `CONTROL` | PENDING |
@@ -31,10 +30,27 @@ Vista de estado a fecha del cierre documental (post Sprint 2.5, previo a integra
 - Equivalencia downstream `SUM` / `IF` (Sprint 2.5)
 - **Cierre completo de la lógica de fórmulas legacy derivada de Medinet:
   2043 / 2043 celdas evaluables**
+- **Inventario semántico preliminar de las 1771 métricas (Sprint 3.1)**:
+  rótulos de sección / fila / columna (raw + normalizado), `semantic_signature`
+  candidata, evidencia de fórmula (cotas de edad, criterios de texto),
+  consistencia rótulo ↔ fórmula, `source = "MEDINET"`. Ver
+  [`docs/SEMANTIC_METRIC_INVENTORY.md`](SEMANTIC_METRIC_INVENTORY.md).
 
-## Siguiente — Pre-Sprint 3 (inventario de fuentes / golden dataset)
+## En curso — Sprint 3
 
-Antes de empezar Sprint 3.1 hay que completar el inventario de las fuentes reales:
+- **3.1 — Semantic Metric Inventory: ✅ COMPLETE.** 1771 métricas candidatas,
+  1741 `COMPLETE` / 30 `PARTIAL` / 0 `AMBIGUOUS` / 0 `NO_CONTEXT`, 0 firmas
+  duplicadas, 0 conflictos rótulo/fórmula. **No** es un mapping validado: no hay
+  dimensiones clínicas todavía.
+- **3.2 — dimensiones clínicas** (traducir los rótulos a sexo / grupo de edad /
+  actividad / especialidad): **pendiente**.
+- **Modelo de *provenance* / `source`**: `MEDINET` ya se aplica en el inventario
+  de 3.1; `EGRESOS` / `RESOURCE_CALCULATION` quedan como requisito de diseño.
+
+## Pre-Sprint 3 — inventario de fuentes / golden dataset (pendiente en paralelo)
+
+Antes de avanzar en la generación oficial hay que completar el inventario de las
+fuentes reales:
 
 - inspeccionar el **REMASEP julio 2026 terminado** que entregará el cliente
   (candidato a golden reference — ver
@@ -46,9 +62,9 @@ Antes de empezar Sprint 3.1 hay que completar el inventario de las fuentes reale
 
 ## Luego
 
-- **Sprint 3.1 — Semantic Metric Inventory**: catálogo de métricas semánticas
-  (formulario · categoría · especialidad · sexo · edad · modalidad · valor) que
-  reemplace la dependencia del texto de fórmula por el DAG de métricas.
+- **Sprint 3.2 — dimensiones semánticas**: traducir `semantic_signature` a
+  `formulario · categoría · especialidad · sexo · edad · modalidad · valor`,
+  usando la evidencia de fórmula de 3.1.
 - Semantic mapping hacia la plantilla oficial.
 - Adaptador de egresos + cálculo de recursos.
 - Escritura vía Excel COM + verificación `CONTROL`.

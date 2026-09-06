@@ -45,6 +45,13 @@
 - [`LEGACY_DOWNSTREAM_EQUIVALENCE.md`](LEGACY_DOWNSTREAM_EQUIVALENCE.md) —
   `SUM` downstream + `IF` validation; cierre completo (2043 / 2043).
 
+## Semantic Layer (Fase 3, en curso)
+
+- [`SEMANTIC_METRIC_INVENTORY.md`](SEMANTIC_METRIC_INVENTORY.md) — Sprint 3.1:
+  rótulos de sección / fila / columna por métrica, `semantic_signature`
+  candidata, evidencia de fórmula, `source = "MEDINET"`. *No es un mapping
+  validado.*
+
 ## Official Template (Fase 5, pendiente)
 
 - [`TEMPLATE_ALIGNMENT.md`](TEMPLATE_ALIGNMENT.md) — estructura de
