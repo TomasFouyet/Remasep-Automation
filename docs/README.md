@@ -61,6 +61,13 @@
   `config/semantic_validation_2026/`; cola de revisión y clusters; los 5
   conflictos reales quedan `BLOCKED_CONFLICT` con `recommended_action =
   HUMAN_REVIEW`. *`AUTO_READY` ≠ validado MINSAL.*
+- [`FINAL_REMASEP_DELTA_PROVENANCE.md`](FINAL_REMASEP_DELTA_PROVENANCE.md) —
+  Sprint 3.4: delta sólo-lectura entre el REMASEP julio incompleto y el final
+  (0 cambios de fórmula, 113 celdas de valor: 52 directas + 61 propagadas) y
+  *provenance* de fuente por celda (`EGRESOS` · `RESOURCE_CALCULATION` ·
+  `SURGICAL_TABLE` · `CONTROL_METADATA` · `UNKNOWN_PENDING` · `MIXED_DERIVED`).
+  32-vs-31 = `OPEN_FUNCTIONAL_QUESTION`; `candidate_golden_status =
+  CANDIDATE_PENDING_SOURCE_COMPLETENESS`. *No automatiza ninguna fuente nueva.*
 
 ## Official Template (Fase 5, pendiente)
 

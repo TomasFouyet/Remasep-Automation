@@ -1,8 +1,8 @@
 # Estado del proyecto
 
-Vista de estado post Sprint 3.3 (capa semántica: inventario + mapeo de
-dimensiones + readiness técnica). Para el detalle por sprint ver
-[`docs/sprints/`](sprints/README.md).
+Vista de estado post Sprint 3.4 (capa semántica: inventario + mapeo de
+dimensiones + readiness técnica; delta del REMASEP final + provenance de fuente).
+Para el detalle por sprint ver [`docs/sprints/`](sprints/README.md).
 
 ## Fases
 
@@ -10,7 +10,7 @@ dimensiones + readiness técnica). Para el detalle por sprint ver
 | --- | --- | --- |
 | **1 — Reverse Engineering** | Inventario del workbook, dependencias, lógica legacy, plantilla oficial, UI shell | **COMPLETE** |
 | **2 — Medinet & Legacy Equivalence** | Ingesta Medinet real, `AC:AL`, agregaciones directas, cierre por dependencias, `SUM`/`IF` downstream | **COMPLETE** |
-| **3 — Semantic Metrics** | Inventario semántico (3.1 ✅), mapeo de dimensiones sexo/edad/alcance/código (3.2 ✅), readiness técnica + cola de revisión (3.3 ✅), modelo con *provenance* | **IN PROGRESS** |
+| **3 — Semantic Metrics** | Inventario semántico (3.1 ✅), mapeo de dimensiones sexo/edad/alcance/código (3.2 ✅), readiness técnica + cola de revisión (3.3 ✅), delta del REMASEP final + provenance de fuente (3.4 ✅) | **IN PROGRESS** |
 | **4 — Additional Sources / Complete Dataset** | Adaptador de egresos, cálculo de recursos, dataset golden | PENDING |
 | **5 — Official Template Mapping** | Mapping semántico generador/Medinet → plantilla MINSAL | PENDING |
 | **6 — Excel Generation / CONTROL** | Escritura vía Excel COM (Windows), recálculo, verificación `CONTROL` | PENDING |
@@ -64,11 +64,32 @@ dimensiones + readiness técnica). Para el detalle por sprint ver
   `overrides.yaml` vacío (arquitectura, sin resolución). `AUTO_READY` ≠ validado
   MINSAL. Ver
   [`docs/SEMANTIC_MAPPING_VALIDATION.md`](SEMANTIC_MAPPING_VALIDATION.md).
-- **3.4+ — dimensiones de actividad / especialidad** y traducción a la tabla
+- **3.4 — Final REMASEP Delta & Source Provenance: ✅ COMPLETE.** Comparación
+  reproducible y sólo-lectura del `2026-7 REMASEP_V1.4.xlsm` (incompleto,
+  `INCOMPLETE_PRE_SURGERY`) contra `REMASEP_V1.4 Julio 2026.xlsm` (terminado
+  según el cliente, `FINAL_PER_CLIENT` · `approval_status = UNCONFIRMED`).
+  Resultado real: **0 cambios de expresión de fórmula, 113 celdas de valor
+  cambiadas** (52 input directo + 61 propagación de fórmula + 0 expresión
+  reescrita; por hoja REMASEP 01 = 58 · REMASEP B1 = 41 · B2 ANEXO = 10 ·
+  CONTROL = 4). `change_kind` se decide con la fórmula **antes y después**
+  (`DIRECT_INPUT_CHANGE` / `FORMULA_RESULT_CHANGE` / `FORMULA_EXPRESSION_CHANGE`),
+  no sólo con la de la versión final. Provenance por celda
+  (`EGRESOS` 51 · `SURGICAL_TABLE` 30 · `UNKNOWN_PENDING` 17 · `RESOURCE_
+  CALCULATION` 10 · `CONTROL_METADATA` 4 · `MIXED_DERIVED` 1). `EGRESOS`
+  (edad/sexo → B1, códigos Qx → B2 ANEXO) confirmado por el cliente; Sección D de
+  REMASEP 01 inferida por encabezado (recursos vs. tabla quirúrgica, revisión
+  humana); Sección E (suspensiones) queda `UNKNOWN_PENDING`. `CONTROL = 0` →
+  `PASS_INTERNAL_VALIDATION` (≠ aprobación MINSAL). 32-vs-31 registrado como
+  `OPEN_FUNCTIONAL_QUESTION`. `candidate_golden_status =
+  CANDIDATE_PENDING_SOURCE_COMPLETENESS`. **No** se automatiza ninguna fuente
+  nueva. Ver
+  [`docs/FINAL_REMASEP_DELTA_PROVENANCE.md`](FINAL_REMASEP_DELTA_PROVENANCE.md).
+- **3.5+ — dimensiones de actividad / especialidad** y traducción a la tabla
   larga semántica: **pendiente**.
-- **Modelo de *provenance* / `source`**: `MEDINET` se aplica en 3.1–3.3;
-  `EGRESOS` / `RESOURCE_CALCULATION` quedan preparados conceptualmente, sin
-  código.
+- **Modelo de *provenance* / `source`**: `MEDINET` se aplica en 3.1–3.3; el delta
+  del REMASEP final (3.4) clasifica `EGRESOS` / `RESOURCE_CALCULATION` /
+  `SURGICAL_TABLE` / `CONTROL_METADATA` / `UNKNOWN_PENDING` / `MIXED_DERIVED`.
+  Todavía **sin** adaptador de egresos ni lector de tabla quirúrgica.
 
 ## Pre-Sprint 3 — inventario de fuentes / golden dataset (pendiente en paralelo)
 
