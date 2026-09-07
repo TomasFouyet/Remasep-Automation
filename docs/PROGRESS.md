@@ -101,9 +101,13 @@ alineación semántica con la plantilla oficial). Para el detalle por sprint ver
   B1` entero es `EGRESOS` (sin source MEDINET). **Revisión de cierre**: se separan
   `target_kind` (qué es la celda) · `target_alignment_role` (`INPUT_TARGET` /
   `DERIVED_TARGET` / `STRUCTURAL` / …) · `target_source_expectation` (default
-  `UNKNOWN`, no `MEDINET`). De los 11285 input targets: **5604 esperados de
-  MEDINET, 1367 alineados, 4237 genuinamente sin source**; fórmulas (1174) y
-  estructurales (4079) **no** son "targets MEDINET faltantes".
+  `UNKNOWN`, no `MEDINET`). `DIRECT_INPUT_TARGET` exige **celda desbloqueada en
+  hoja protegida**, no sólo "sin fórmula" (rótulos y códigos de prestación
+  tampoco tienen fórmula): 2 906 celdas dejaron de contarse como input
+  (`INPUT_TARGET` 11285 → **8379**; `STRUCTURAL` → **6985**), **sin cambiar el
+  matching**. De los 8379 input targets: **5227 esperados de MEDINET, 1367
+  alineados, 3860 genuinamente sin source**; fórmulas (1174) y estructurales
+  (6985) **no** son "targets MEDINET faltantes".
   `approval_status = UNCONFIRMED`,
   `candidate_golden_status = CANDIDATE_PENDING_SOURCE_COMPLETENESS`. **No**
   escribe Excel, **no** COM. Ver

@@ -396,3 +396,105 @@ def test_alignment_role_maps_from_kind():
     assert ta.alignment_role(ta.FORMULA_TARGET) == ta.ROLE_DERIVED_TARGET
     assert ta.alignment_role(ta.STRUCTURAL) == ta.ROLE_STRUCTURAL
     assert ta.alignment_role("weird") == ta.ROLE_UNKNOWN
+
+
+# --- _classify_target: DIRECT_INPUT_TARGET exige evidencia de ingreso ---
+# (revisión de cierre Sprint 3.5: `sin fórmula` NO basta; rótulos, encabezados
+#  y códigos tampoco tienen fórmula.)
+
+_GRID = ("COMPLETE",)
+
+
+def _kind(**kw):
+    base = {
+        "has_formula": False, "is_blank": True, "has_value": False, "value": None,
+        "context_status": "COMPLETE", "grid_statuses": _GRID,
+        "sheet_protected": True, "cell_locked": False,
+    }
+    base.update(kw)
+    return ta._classify_target(**base)
+
+
+def test_formula_cell_is_formula_target():
+    assert _kind(has_formula=True) == ta.FORMULA_TARGET
+
+
+def test_unlocked_blank_grid_cell_in_protected_sheet_is_input_target():
+    assert _kind(sheet_protected=True, cell_locked=False, is_blank=True) \
+        == ta.DIRECT_INPUT_TARGET
+
+
+def test_unlocked_numeric_grid_cell_is_input_target():
+    assert _kind(sheet_protected=True, cell_locked=False, is_blank=False,
+                 has_value=True, value=42) == ta.DIRECT_INPUT_TARGET
+
+
+def test_locked_label_cell_no_formula_is_structural_not_input():
+    # rótulo de texto, bloqueado -> STRUCTURAL, aunque no tenga fórmula
+    assert _kind(sheet_protected=True, cell_locked=True, is_blank=False,
+                 has_value=True, value="INTERVENCIONES QUIRÚRGICAS NEUROCIRUGÍA") \
+        == ta.STRUCTURAL
+
+
+def test_locked_header_cell_is_structural_not_input():
+    assert _kind(sheet_protected=True, cell_locked=True, is_blank=False,
+                 has_value=True, value="TOTAL") == ta.STRUCTURAL
+
+
+def test_locked_blank_grid_cell_is_structural_not_input():
+    # celda de la grilla, sin fórmula, sin valor, pero BLOQUEADA -> no es input
+    assert _kind(sheet_protected=True, cell_locked=True, is_blank=True) == ta.STRUCTURAL
+
+
+def test_procedure_code_as_number_is_structural():
+    # 1103001 guardado como int (columna de código de B2 ANEXO) -> STRUCTURAL
+    assert _kind(sheet_protected=True, cell_locked=True, is_blank=False,
+                 has_value=True, value=1103001) == ta.STRUCTURAL
+    # incluso si estuviera desbloqueada, un código de 7 dígitos no es un dato
+    assert _kind(sheet_protected=True, cell_locked=False, is_blank=False,
+                 has_value=True, value=1103001) == ta.STRUCTURAL
+
+
+def test_unprotected_sheet_without_evidence_is_unknown_not_input():
+    # sin protección de hoja no hay evidencia de ingreso -> UNKNOWN, no INPUT
+    assert _kind(sheet_protected=False, cell_locked=None, is_blank=True) \
+        == ta.UNKNOWN_TARGET
+    assert _kind(sheet_protected=False, cell_locked=None, is_blank=False,
+                 has_value=True, value=7) == ta.STRUCTURAL
+
+
+def test_build_target_inventory_uses_sheet_protection(tmp_path):
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, Protection
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "B2 ANEXO"
+    ws.protection.sheet = True
+    ws["A1"] = "CÓDIGOS"
+    ws["B1"] = "GLOSA"
+    ws["C1"] = "TOTAL"
+    ws["A2"] = "I.- SANGRE, HEMATOLOGÍA"
+    ws["A2"].font = Font(bold=True)
+    ws["A3"] = "0301002"                       # código: bloqueado -> STRUCTURAL
+    ws["B3"] = "Ácido fólico o Folatos"        # glosa: bloqueado -> STRUCTURAL
+    ws["C3"].protection = Protection(locked=False)  # dato -> DIRECT_INPUT_TARGET
+    ws["A4"] = "0301003"
+    ws["B4"] = "Adenograma"
+    ws["C4"] = "=SUM(C3:C3)"                   # fórmula -> FORMULA_TARGET
+    path = tmp_path / "tpl.xlsx"
+    wb.save(path)
+
+    from openpyxl import load_workbook
+    wv = load_workbook(path, data_only=True)
+    wf = load_workbook(path, data_only=False)
+    inv = ta.build_target_inventory(wv["B2 ANEXO"], wf["B2 ANEXO"],
+                                    policy=POLICY, regions=REGIONS)
+    by_cell = {t.target_cell: t for t in inv}
+    assert by_cell["C3"].target_kind == ta.DIRECT_INPUT_TARGET
+    assert by_cell["C4"].target_kind == ta.FORMULA_TARGET
+    assert by_cell.get("A3") is None or by_cell["A3"].target_kind == ta.STRUCTURAL
+    assert by_cell.get("B3") is None or by_cell["B3"].target_kind == ta.STRUCTURAL
+    # ningún código/glosa quedó como INPUT_TARGET
+    inputs = [t for t in inv if t.target_alignment_role == ta.ROLE_INPUT_TARGET]
+    assert {t.target_cell for t in inputs} == {"C3"}

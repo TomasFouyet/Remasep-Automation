@@ -38,6 +38,15 @@ RESOURCE_CALCULATION, **no** toca el mapeo semántico de Sprint 3.2.
 | **`target_alignment_role`** | ¿**para qué** sirve en la alineación? | `INPUT_TARGET` (puede recibir un mapping) · `DERIVED_TARGET` (fórmula, depende de inputs) · `STRUCTURAL` (rótulo/código, nunca alineable) · `VALIDATION` · `UNKNOWN` |
 | **`target_source_expectation`** | ¿de qué **fuente** debería venir? | `MEDINET` · `EGRESOS` · `RESOURCE_CALCULATION` · `SURGICAL_TABLE` · `CONTROL_METADATA` · `UNKNOWN` |
 
+- **`DIRECT_INPUT_TARGET` exige evidencia estructural de ser una celda de
+  ingreso.** La plantilla oficial tiene todas las hojas **protegidas**; el autor
+  sólo desbloquea (`protection.locked = False`) las celdas donde el usuario debe
+  escribir. Ésa es la señal autoritativa. *No tener fórmula* NO basta: los
+  rótulos, encabezados y **códigos de prestación** (columna A de B2 ANEXO, p.ej.
+  `A1024 = 1103001`) tampoco tienen fórmula y estaban siendo mal clasificados
+  como input. Una celda bloqueada, o una hoja sin proteger, → `STRUCTURAL` /
+  `UNKNOWN`, nunca `INPUT_TARGET`. Los 11 inputs de B2 conocidos (Sprint 3.4:
+  `C1317…C1524`; y `C833/C953/C954/C957/C958`) están todos `locked = False`.
 - Una `STRUCTURAL` **nunca** cuenta como "target MEDINET faltante".
 - Una `DERIVED_TARGET` (fórmula) **no** es un punto de ingreso: no se confunde con un `INPUT_TARGET`.
 - **`target_source_expectation` = `UNKNOWN` por defecto.** Sólo se marca `MEDINET`
@@ -150,27 +159,30 @@ procedure-code exact matches   5
 
 ```
 inventario físico total          16538
-  por rol   INPUT_TARGET 11285 · DERIVED_TARGET 1174 · STRUCTURAL 4079
+  por rol   INPUT_TARGET 8379 · DERIVED_TARGET 1174 · STRUCTURAL 6985
   por fuente esperada   MEDINET 6697 · EGRESOS 5861 · RESOURCE_CALCULATION 280 · UNKNOWN 3700
 
-de los 11285 INPUT_TARGET:
-  MEDINET esperados            5604
-    alineados                  1367   (de los 1122 EXACT + 245 STRONG, todos caen en INPUT_TARGET)
-    genuinamente sin source    4237   ← "faltó encontrar un source" (NO_MEDINET_SOURCE_FOUND)
-  NO-MEDINET (EGRESOS/recursos) 4023  ← "nunca debían tener source MEDINET"
-  UNKNOWN (fuente no demostrable) 1658
+de los 8379 INPUT_TARGET (= celdas desbloqueadas en hoja protegida):
+  MEDINET esperados            5227
+    alineados                  1367   (los 1122 EXACT + 245 STRONG, todos caen en INPUT_TARGET)
+    genuinamente sin source    3860   ← "faltó encontrar un source" (NO_MEDINET_SOURCE_FOUND)
+  NO-MEDINET (EGRESOS/recursos) 1930  ← "nunca debían tener source MEDINET"
+  UNKNOWN (fuente no demostrable) 1222
 
 filas técnicas sin match (todas las clases)   15171
-  NO_MEDINET_SOURCE_FOUND      4237   (genuino)
-  UNKNOWN_SOURCE               1658
-  NON_MEDINET_REGION           4023
+  NO_MEDINET_SOURCE_FOUND      3860   (genuino)
+  UNKNOWN_SOURCE               1222
+  NON_MEDINET_REGION           1930
   DERIVED_TARGET_NOT_INPUT     1174   (fórmulas — no son puntos de ingreso)
-  STRUCTURAL_NOT_ALIGNMENT_TARGET 4079  (rótulos / códigos)
+  STRUCTURAL_NOT_ALIGNMENT_TARGET 6985  (rótulos / encabezados / códigos)
 ```
 
-> El número técnico (~15 k / 11 k) **no** son "targets MEDINET faltantes":
-> incluye estructurales, fórmulas y celdas sin fuente demostrable. Los targets
-> MEDINET input genuinamente sin alinear son **4237**.
+> Revisión de cierre: el criterio de `DIRECT_INPUT_TARGET` pasó de "no tiene
+> fórmula" a "**celda desbloqueada en hoja protegida**". **2 906** celdas
+> (rótulos, encabezados, códigos de prestación) dejaron de contarse como input
+> (`INPUT_TARGET` 11285 → **8379**; `STRUCTURAL` 4079 → **6985**). El matching
+> **no cambió** (los 1367 targets alineados ya estaban todos desbloqueados). Los
+> targets MEDINET input genuinamente sin alinear bajan de 4237 a **3860**.
 
 ---
 

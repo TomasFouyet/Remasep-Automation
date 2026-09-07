@@ -347,23 +347,48 @@ def _looks_structural_value(value: object) -> bool:
     if isinstance(value, str):
         stripped = value.strip()
         if stripped.isdigit() and 4 <= len(stripped) <= 9:
-            return True  # celda de código
+            return True  # celda de código (texto)
         if len(stripped) > 3 and not stripped.replace(".", "").replace(",", "").isdigit():
             return True  # celda de texto / glosa
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        digits = str(int(value)) if float(value).is_integer() else ""
+        if 4 <= len(digits) <= 9:
+            return True  # código de prestación guardado como número (p.ej. 1103001)
     return False
 
 
 def _classify_target(*, has_formula: bool, is_blank: bool, has_value: bool,
                      value: object, context_status: str,
-                     grid_statuses: tuple[str, ...]) -> str:
+                     grid_statuses: tuple[str, ...],
+                     sheet_protected: bool, cell_locked: bool | None) -> str:
+    """Clasifica una celda de la plantilla.
+
+    `DIRECT_INPUT_TARGET` exige **evidencia estructural de ser una celda de
+    ingreso**: en una hoja protegida, que la celda esté explícitamente
+    **desbloqueada** (``protection.locked is False``) — el autor de la hoja sólo
+    permite escribir ahí. "No tener fórmula" NO basta: rótulos, encabezados y
+    códigos tampoco tienen fórmula.
+    """
     if has_formula:
         return FORMULA_TARGET
     if has_value and _looks_structural_value(value):
         return STRUCTURAL
-    if context_status in grid_statuses and (is_blank or has_value):
-        return DIRECT_INPUT_TARGET
-    if context_status in ("PARTIAL", "AMBIGUOUS", "COMPLETE"):
-        return STRUCTURAL
+    in_grid = context_status in grid_statuses
+
+    if sheet_protected:
+        # Semántica de protección de Excel: en una hoja protegida el usuario sólo
+        # puede escribir en las celdas DESBLOQUEADAS. Es la señal autoritativa.
+        if cell_locked is False:
+            return DIRECT_INPUT_TARGET if in_grid else UNKNOWN_TARGET
+        # bloqueada -> rótulo / encabezado / contenido estático
+        return STRUCTURAL if (in_grid or context_status in ("PARTIAL", "AMBIGUOUS")) else UNKNOWN_TARGET
+
+    # Hoja sin proteger: `protection.locked` no es fiable. Sin evidencia de
+    # ingreso -> UNKNOWN es preferible a INPUT_TARGET (revisión de cierre §5).
+    if in_grid and is_blank:
+        return UNKNOWN_TARGET
+    if in_grid or context_status in ("PARTIAL", "AMBIGUOUS"):
+        return STRUCTURAL if has_value else UNKNOWN_TARGET
     return UNKNOWN_TARGET
 
 
@@ -391,6 +416,7 @@ def build_target_inventory(
     form = policy.canonical_form(ws_values.title)
     grid_statuses = _GRID_STATUSES_FLAT if form in _FLAT_FORMS else _GRID_STATUSES_DEFAULT
     keep_statuses = set(grid_statuses)
+    sheet_protected = bool(getattr(ws_formulas.protection, "sheet", False))
     out: list[TargetMetricContext] = []
     for r in range(1, layout.max_row + 1):
         for c in range(1, layout.max_col + 1):
@@ -403,6 +429,7 @@ def build_target_inventory(
             fcell = ws_formulas.cell(row=r, column=c)
             has_formula = fcell.data_type == "f"
             raw_formula = fcell.value if has_formula and isinstance(fcell.value, str) else ""
+            cell_locked = getattr(getattr(fcell, "protection", None), "locked", None)
             vcell = ws_values.cell(row=r, column=c)
             has_value = vcell.value not in (None, "") and not has_formula
             is_blank = vcell.value in (None, "") and not has_formula
@@ -410,6 +437,7 @@ def build_target_inventory(
                 has_formula=has_formula, is_blank=is_blank, has_value=has_value,
                 value=vcell.value, context_status=ctx.context_status,
                 grid_statuses=grid_statuses,
+                sheet_protected=sheet_protected, cell_locked=cell_locked,
             )
             column_struct = strip_sex_age_tokens(ctx.column_labels_norm)
             expectation, evidence = region_expectation(

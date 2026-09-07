@@ -13,12 +13,13 @@ import json
 import align_official_template as af
 import pytest
 from openpyxl import Workbook
-from openpyxl.styles import Font
+from openpyxl.styles import Font, Protection
 
 from remasep.services import template_alignment as ta
 
 _DETAIL = "Atenciones - Detalles de citas"
 _BOLD = Font(bold=True)
+_UNLOCKED = Protection(locked=False)
 _SECRET = "PACIENTE-SECRETO-XYZ"
 
 _COLS = {
@@ -94,10 +95,16 @@ def _build_generator(path):
 
 
 def _build_template(path):
-    """Mismo vocabulario semántico, coordenadas totalmente distintas."""
+    """Mismo vocabulario semántico, coordenadas totalmente distintas.
+
+    Como la plantilla oficial real: hojas **protegidas**; sólo las celdas de dato
+    van DESBLOQUEADAS (`Protection(locked=False)`). Los rótulos/códigos quedan
+    bloqueados -> `STRUCTURAL`, no `DIRECT_INPUT_TARGET`.
+    """
     wb = Workbook()
     od = wb.active
     od.title = "REMASEP_OD"
+    od.protection.sheet = True
     od["A20"] = "SECCIÓN A: PRUEBAS ODONTOLÓGICAS"
     od["A20"].font = _BOLD
     od.merge_cells("D21:E21")
@@ -106,12 +113,13 @@ def _build_template(path):
     od["E22"] = "Mujeres"
     od["A25"] = "5010009 - VIDRIO IONÓMERO"
     od["B25"] = "Obturación de vidrio ionómero"
-    # D25 en blanco -> DIRECT_INPUT_TARGET; F25 fórmula -> FORMULA_TARGET
-    od["F25"] = "=D25"
+    od["D25"].protection = _UNLOCKED       # celda de dato -> DIRECT_INPUT_TARGET
+    od["F25"] = "=D25"                     # fórmula -> FORMULA_TARGET
     od["G21"] = "TOTAL"
     od["G22"] = "Ambos sexo"
 
     b1 = wb.create_sheet("REMASEP B1")
+    b1.protection.sheet = True
     b1["A1"] = "SECCIÓN A: INTERVENCIONES QUIRÚRGICAS"
     b1["A1"].font = _BOLD
     b1.merge_cells("C2:D2")
@@ -120,17 +128,18 @@ def _build_template(path):
     b1["D3"] = "Hombres"
     b1["A5"] = "Electivas"
     b1["B5"] = "Mayor Ambulatorias"
-    # C5 en blanco -> DIRECT_INPUT_TARGET, región EGRESOS
+    b1["C5"].protection = _UNLOCKED        # celda de dato, región EGRESOS
 
     b2 = wb.create_sheet("B2 ANEXO")
+    b2.protection.sheet = True
     b2["A1"] = "CÓDIGOS"
     b2["B1"] = "GLOSA"
     b2["C1"] = "TOTAL"
     b2["A2"] = "A. KINESIOLOGÍA"
     b2["A2"].font = _BOLD
-    b2["A3"] = "0601105"
+    b2["A3"] = "0601105"                   # código: bloqueado -> STRUCTURAL
     b2["B3"] = "Atención Kinesiológica Integral Ambulatoria"
-    # C3 en blanco -> DIRECT_INPUT_TARGET (match por código)
+    b2["C3"].protection = _UNLOCKED        # celda de dato (match por código)
     wb.save(path)
 
 

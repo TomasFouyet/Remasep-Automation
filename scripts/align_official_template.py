@@ -219,6 +219,12 @@ Tres conceptos **distintos**:
 | `target_alignment_role` | ¿**para qué** sirve en la alineación? | `INPUT_TARGET` · `DERIVED_TARGET` · `STRUCTURAL` · `VALIDATION` · `UNKNOWN` |
 | `target_source_expectation` | ¿de qué **fuente** debería venir? | `MEDINET` · `EGRESOS` · `RESOURCE_CALCULATION` · `SURGICAL_TABLE` · `CONTROL_METADATA` · `UNKNOWN` |
 
+- `DIRECT_INPUT_TARGET` exige **evidencia estructural de ser una celda de
+  ingreso**: en una hoja protegida (como la plantilla oficial), que la celda esté
+  explícitamente **desbloqueada** (`protection.locked = False`). "No tener
+  fórmula" NO basta — rótulos, encabezados y códigos de prestación tampoco tienen
+  fórmula. Sin evidencia (hoja sin proteger, celda bloqueada) la celda queda
+  `STRUCTURAL` o `UNKNOWN`, nunca `INPUT_TARGET`.
 - Una celda `STRUCTURAL` **nunca** es un target que requiere source.
 - Una `DERIVED_TARGET` (fórmula) depende de inputs pero **no** es punto de
   ingreso.
