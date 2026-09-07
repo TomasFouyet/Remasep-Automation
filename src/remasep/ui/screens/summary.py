@@ -236,10 +236,11 @@ class SummaryScreen(QWidget):
             ("Válidos", "ok", result.valid_records),
             ("Inválidos", "warning" if result.invalid_records else "ok", result.invalid_records),
             ("Dentro del período", "ok", result.records_in_period),
+            ("Fuera del período", "neutral", result.records_outside_period),
             (
-                "Fuera del período",
-                "warning" if result.records_outside_period else "neutral",
-                result.records_outside_period,
+                f"Procesados para {result.period_label}",
+                "ok",
+                result.processing_scope_records,
             ),
         )
         for name, status, value in rows:

@@ -128,7 +128,10 @@ def test_invalid_fecha_nacimiento_but_blank_is_ok(make_medinet, service):
     result = service.analyze(path, PERIOD)
     assert result.invalid_records == 1  # solo la que tiene fecha presente e inválida
     assert any(p.error_code == "FECHA_NACIMIENTO_INVALID" for p in result.problems)
-    assert result.age_missing == 2  # ninguna de las dos tiene edad calculable
+    # el desglose de edad se calcula sobre el alcance de procesamiento (1 registro
+    # válido en período, sin fecha de nacimiento -> edad no calculable).
+    assert result.processing_scope_records == 1
+    assert result.age_missing == 1
 
 
 def test_empty_sexo(make_medinet, service):
@@ -238,9 +241,71 @@ def test_records_outside_period_not_filtered(make_medinet, service):
     assert result.total_records == 3
     assert result.records_in_period == 1
     assert result.records_outside_period == 2
+    assert result.processing_scope_records == 1
+    # los registros de otros períodos NO son un error ni una advertencia
     period_check = next(v for v in result.validations if v.name == "Período correcto")
-    assert period_check.status == "warning"
-    assert "2" in period_check.message
+    assert period_check.status == "ok"
+    assert "otros períodos" in period_check.message
+    assert "no se incluir" in period_check.message.lower()
+
+
+# --- alcance de procesamiento (hotfix período) -----------------
+
+
+def _classified_only_in_scope(result) -> bool:
+    return result.legacy_matches_total + result.non_target_records == result.processing_scope_records
+
+
+def test_processing_scope_is_valid_intersect_in_period(make_medinet, service):
+    path = make_medinet([
+        _row(dia=date(2026, 8, 5)),          # válido, en período
+        _row(dia=date(2026, 8, 20)),         # válido, en período
+        _row(dia=date(2026, 9, 3)),          # válido, OTRO período
+        _row(dia=date(2026, 7, 30)),         # válido, OTRO período
+        _row(dia=date(2026, 8, 9), sexo=""),  # en período pero INVÁLIDO
+    ])
+    result = service.analyze(path, PERIOD)
+    assert result.valid_records == 4
+    assert result.records_in_period == 2       # de los válidos
+    assert result.processing_scope_records == 2
+    assert _classified_only_in_scope(result)
+
+
+def test_classification_runs_only_in_selected_period(make_medinet, service):
+    # 3 en período + 5 en otros meses; sólo los 3 se clasifican / cuentan
+    rows = [_row(dia=date(2026, 8, d)) for d in (2, 12, 22)]
+    rows += [_row(dia=date(2026, m, 15)) for m in (1, 2, 3, 9, 10)]
+    result = service.analyze(make_medinet(rows), PERIOD)
+    assert result.total_records == 8
+    assert result.valid_records == 8
+    assert result.processing_scope_records == 3
+    assert result.legacy_matches_total + result.non_target_records == 3
+    assert result.age_computed + result.age_legacy_zero + result.age_missing == 3
+
+
+def test_out_of_period_records_do_not_change_metrics(make_medinet, service):
+    base = [_row(dia=date(2026, 8, 3)), _row(dia=date(2026, 8, 17))]
+    a = service.analyze(make_medinet(list(base)), PERIOD)
+    b = service.analyze(
+        make_medinet([*base, _row(dia=date(2026, 5, 1)), _row(dia=date(2026, 11, 30))]),
+        PERIOD,
+    )
+    assert a.processing_scope_records == b.processing_scope_records == 2
+    assert a.legacy_counts == b.legacy_counts
+    assert a.legacy_matches_total == b.legacy_matches_total
+    assert a.non_target_records == b.non_target_records
+    assert (a.age_computed, a.age_legacy_zero, a.age_missing) == \
+           (b.age_computed, b.age_legacy_zero, b.age_missing)
+    # pero el conteo de fuera-de-período sí cambia
+    assert b.records_outside_period == 2 and a.records_outside_period == 0
+
+
+def test_all_valid_is_not_processing_scope_when_multi_month(make_medinet, service):
+    rows = [_row(dia=date(2026, 8, 10))] + [_row(dia=date(2026, 4, 10))] * 4
+    result = service.analyze(make_medinet(rows), PERIOD)
+    assert result.valid_records == 5
+    assert result.processing_scope_records == 1
+    assert result.valid_records != result.processing_scope_records
 
 
 # --- 10/11/12. cálculo de edad (semántica legacy DATEDIF "Y") ---

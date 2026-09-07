@@ -227,10 +227,25 @@ class AnalysisScreen(QWidget):
         self._registros_layout.addWidget(
             StatusRow(
                 "Fuera del período",
-                status="warning" if result.records_outside_period else "neutral",
+                status="neutral",
                 value=format_int(result.records_outside_period),
             )
         )
+        self._registros_layout.addWidget(
+            StatusRow(
+                f"Procesados para {result.period_label}",
+                status="ok",
+                value=format_int(result.processing_scope_records),
+            )
+        )
+        if result.records_outside_period:
+            self._registros_layout.addWidget(
+                _muted(
+                    f"{format_int(result.records_outside_period)} registros pertenecen a "
+                    f"otros períodos y no se incluirán en el REMASEP de "
+                    f"{result.period_label}. No se descartan del archivo."
+                )
+            )
         period_dates = "—"
         if result.min_service_date and result.max_service_date:
             period_dates = f"{result.min_service_date} → {result.max_service_date}"
@@ -246,6 +261,12 @@ class AnalysisScreen(QWidget):
             )
 
         _clear(self._legacy_layout, keep=1)
+        self._legacy_layout.addWidget(
+            _muted(
+                f"Clasificación sobre los {format_int(result.processing_scope_records)} "
+                f"registros de {result.period_label} (no sobre todo el archivo)."
+            )
+        )
         for code in ("AG", "AH", "AI", "AJ", "AK", "AL"):
             self._legacy_layout.addWidget(
                 StatusRow(
@@ -256,7 +277,7 @@ class AnalysisScreen(QWidget):
             )
         self._legacy_layout.addWidget(
             StatusRow(
-                "Válidos sin regla legacy",
+                "Sin regla legacy (en el período)",
                 status="neutral",
                 value=format_int(result.non_target_records),
             )

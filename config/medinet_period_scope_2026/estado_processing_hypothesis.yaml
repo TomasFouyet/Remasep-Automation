@@ -1,0 +1,52 @@
+# =============================================================================
+# Hipótesis del comportamiento legacy por ESTADO — hotfix período (Sprint 3.5)
+# =============================================================================
+#
+# Reconstrucción del comportamiento OBSERVADO del generador legacy
+# (`GENERACION DATOS REMASEP.xlsx`) al filtrar el detalle de citas de Medinet.
+#
+# NO es una regla funcional confirmada por Fundación Gantz / MINSAL.
+# NO se aplica todavía en la clasificación / el alcance de procesamiento.
+# Queda documentada, con evidencia reproducible, para confirmación funcional.
+
+version: medinet_period_scope_2026
+status: CURRENT_LEGACY_BEHAVIOR_PENDING_FUNCTIONAL_CONFIRMATION
+
+disclaimer: >-
+  El alcance de procesamiento del REMASEP mensual es, HOY, sólo por período
+  (registros estructuralmente válidos ∩ mes/año). El filtro por ESTADO de abajo
+  es una hipótesis con evidencia de recuento exacto, pendiente de confirmar con
+  el cliente antes de implementarse.
+
+# Estados que el generador legacy CONSERVA (evidencia de julio 2026).
+estado_kept_by_legacy:
+  - "Atendido"
+  - "Atención Pausada"
+  - "En Sala de Espera"
+  - "En Atención"
+
+# Estados que el generador legacy DESCARTA (evidencia de julio 2026).
+estado_excluded_by_legacy:
+  - "Cancelado"
+  - "No Se Presenta"
+  - "Agendado"
+  - "Confirmado"
+  - "Re-Agendado"
+
+evidence:
+  period: "Julio 2026"
+  direct_export_file: "detalle_citas - 2026-09-07T123630.940.xlsx"
+  legacy_reference_file: "GENERACION DATOS REMASEP.xlsx"
+  raw_file_records: 11501
+  direct_export_in_period_records: 2114
+  legacy_reference_active_records: 1364
+  direct_in_period_with_kept_estado: 1364      # == legacy_reference_active_records
+  direct_in_period_with_excluded_estado: 750
+  legacy_is_exact_multiset_subset_of_direct_no_estado_fp: true
+  legacy_full_fingerprint_unmatched: 1         # 1 registro cambió de ESTADO
+  note: >-
+    El subconjunto de estados "kept" del export directo reproduce EXACTAMENTE los
+    1364 registros activos del detalle legacy. Sin ESTADO en la huella, los 1364
+    legacy son un subconjunto multiset exacto de los 2114. Con ESTADO, 1 registro
+    difiere: el export directo (2026-09-07) es posterior al snapshot legacy y un
+    ESTADO progresó ("En Sala de Espera" -> "Atendido").

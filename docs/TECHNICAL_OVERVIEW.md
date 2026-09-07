@@ -42,7 +42,18 @@ de datos.
 - Los logs futuros no deben contener RUN, nombre ni fecha de nacimiento
   individuales.
 
-## 4. Filas estructurales del dataset de referencia
+## 4. Input de producción, filas estructurales y alcance de período
+
+**Input de producción** = el export directo de Medinet **"Detalle de citas"**
+(`detalle_citas - …xlsx`). `GENERACION DATOS REMASEP.xlsx` es sólo una
+**referencia legacy** de ingeniería inversa; la app **no** depende de él. Ver
+[`docs/MEDINET_INPUT_CONTRACT.md`](MEDINET_INPUT_CONTRACT.md).
+
+Un export Medinet trae **varios meses**. El REMASEP mensual se calcula SOLO sobre
+`processing_scope_records` = **registros estructuralmente válidos ∩ del mes/año
+seleccionados**. Los registros de otros períodos **no se descartan** del archivo;
+sólo quedan fuera del cálculo (clasificación legacy, edades y —a futuro—
+`SemanticMetric`).
 
 `GENERACION DATOS REMASEP.xlsx`, hoja `Atenciones - Detalles de citas`, período
 **julio 2026** (SHA256 `fc2e1536…d15b79`):
@@ -52,6 +63,21 @@ physical_rows_examined = 2006
 structural_empty_rows  =  642   (fórmulas AC:AL arrastradas más allá de las atenciones)
 active records         = 1364   (= 1364 válidos, 0 inválidos)
 ```
+
+Export directo "Detalle de citas" de julio 2026 (`3331d61c…`):
+
+```
+raw_file_records         = 11 501
+in-period (Julio 2026)    =  2 114   -> processing_scope_records
+out-of-period             =  9 387
+```
+
+Los 1 364 registros activos del detalle legacy son un **subconjunto multiset
+exacto** (huella semántica sin ESTADO) de los 2 114 del export directo. La
+diferencia de 750 se explica por ESTADO: el generador legacy conserva
+`{Atendido, Atención Pausada, En Sala de Espera, En Atención}` (= 1 364 exactos) —
+**hipótesis con evidencia**, marcada `CURRENT_LEGACY_BEHAVIOR_PENDING_
+FUNCTIONAL_CONFIRMATION`, **no** implementada como regla.
 
 **Las 2006 filas físicas NO son 2006 atenciones.** Invariante:
 `physical_rows_examined = structural_empty_rows + total_records`.

@@ -1,0 +1,50 @@
+# =============================================================================
+# Política de ALINEACIÓN SEMÁNTICA generador MEDINET → plantilla oficial — Sprint 3.5
+# =============================================================================
+#
+# La plantilla oficial REMASEP tiene OTRO layout que el workbook generador
+# legacy. El emparejamiento NO usa la coordenada como prueba: se basa en
+# evidencia por dimensión (forma, sección, fila, columna, sexo, edad, alcance,
+# código de procedimiento) con un score determinista y explicable.
+#
+# `AUTO_READY` de Sprint 3.3 es el único estado elegible como source. Un match
+# NO significa "MINSAL validated".
+
+version: official_template_alignment_2026
+status: preliminary_pending_functional_validation
+disclaimer: >-
+  Reglas de matching estructural sobre rótulos normalizados. Pendiente de
+  validación funcional por Fundación Gantz / MINSAL.
+
+# Nombre de hoja (normalizado) -> token de forma canónico, para comparar contra
+# `SemanticMetric.form`.
+form_by_sheet:
+  "REMASEP_OD": REMASEP_OD
+  "REMASEP 01": REMASEP_01
+  "REMASEP B1": REMASEP_B1
+  "B2 ANEXO": B2_ANEXO
+
+# Peso de cada dimensión en el score (0..1 = suma ponderada de MATCH sobre las
+# dimensiones aplicables presentes en ambos lados). FORM es una compuerta, no se
+# pondera.
+scoring:
+  weights:
+    PROCEDURE_CODE: 5
+    ROW_PATH: 4
+    COLUMN_PATH: 4
+    SEX: 3
+    AGE: 3
+    SECTION: 2
+    AGGREGATION_SCOPE: 2
+
+thresholds:
+  exact: 1.0      # todas las dimensiones aplicables en MATCH
+  strong: 0.75    # evidencia suficiente pese a alguna diferencia estructural
+  tie_margin: 0.05  # varios targets dentro de este margen del mejor -> AMBIGUOUS
+
+# Dimensiones que se esperan resueltas por forma (documentación; el score las usa
+# sólo si están presentes en ambos lados).
+required_dimensions:
+  REMASEP_OD: [FORM, SECTION, ROW_PATH, COLUMN_PATH, SEX, AGE, AGGREGATION_SCOPE]
+  REMASEP_01: [FORM, SECTION, ROW_PATH, COLUMN_PATH, SEX, AGE, AGGREGATION_SCOPE]
+  B2_ANEXO: [FORM, ROW_PATH, PROCEDURE_CODE, AGGREGATION_SCOPE]

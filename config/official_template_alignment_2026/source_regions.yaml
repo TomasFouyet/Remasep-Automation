@@ -1,0 +1,111 @@
+# =============================================================================
+# Regiones de la plantilla oficial con FUENTE ESPERADA declarada — Sprint 3.5
+# =============================================================================
+#
+# `expected_source` de un target de la plantilla. Orden = prioridad: las regiones
+# NO-MEDINET (más específicas, con evidencia de provenance del Sprint 3.4) se
+# evalúan ANTES que las regiones MEDINET amplias. Si NINGUNA región reclama la
+# celda -> `expected_source = UNKNOWN` (no se inventa MEDINET sin evidencia
+# estructural).
+#
+# NO-MEDINET: derivadas de `docs/FINAL_REMASEP_DELTA_PROVENANCE.md`. Una métrica
+# MEDINET nunca se alinea contra estas celdas (no se mezclan fuentes).
+#
+# MEDINET: evidencia estructural positiva de que el target pertenece al subgrafo
+# ambulatorio contado desde `Atenciones` (Sprints 2–3).
+#
+# Identificación: por uno o más rótulos de **sección** (`section_contains`,
+# evidencia semántica; acepta string o lista) y/o, para el workbook de referencia
+# actual, un rango de filas documentado y testeado (`row_min` / `row_max`).
+#
+# `status: preliminary` — pendiente de confirmación funcional del cliente.
+
+version: official_template_alignment_2026
+status: preliminary_pending_functional_validation
+
+regions:
+  # --- REMASEP B1: grilla de cirugías por edad/sexo -> EGRESOS ---------
+  - region_id: B1_SURGERY_GRID
+    sheet: "REMASEP B1"
+    expected_source: EGRESOS
+    section_contains: "INTERVENCIONES QUIRÚRGICAS"
+    row_min: null
+    row_max: null
+    evidence: >-
+      cliente: edad + sexo de cirugía provienen de egresos hospitalarios
+      (Sprint 3.4, 8 inputs directos EGRESOS/CLIENT_CONFIRMED en el REMASEP final)
+
+  - region_id: B1_WHOLE_SHEET
+    sheet: "REMASEP B1"
+    expected_source: EGRESOS
+    section_contains: ""
+    row_min: 1
+    row_max: 135
+    evidence: >-
+      REMASEP B1 no tiene subgrafo MEDINET en el generador legacy; toda su
+      producción de julio 2026 proviene de EGRESOS
+
+  # --- REMASEP 01 Sección D: capacidad / utilización de quirófanos -----
+  - region_id: R01_SECTION_D_RESOURCES
+    sheet: "REMASEP 01"
+    expected_source: RESOURCE_CALCULATION
+    section_contains: "CAPACIDAD INSTALADA Y UTILIZACIÓN DE QUIRÓFANOS"
+    row_min: 124
+    row_max: 133
+    evidence: >-
+      Sprint 3.4: columnas de dotación / habilitados / horas hábiles ->
+      RESOURCE_CALCULATION; columnas de tabla quirúrgica / horas ocupadas ->
+      SURGICAL_TABLE. Regla por columna sin confirmar; ninguna es MEDINET.
+
+  # --- REMASEP 01 Sección E: causas de suspensión -> desconocida -------
+  - region_id: R01_SECTION_E_SUSPENSIONS
+    sheet: "REMASEP 01"
+    expected_source: UNKNOWN
+    section_contains: "CAUSAS DE SUSPENSIÓN DE CIRUGÍAS ELECTIVAS"
+    row_min: 134
+    row_max: 146
+    evidence: >-
+      Sprint 3.4: fuente no confirmada por el cliente; no se asume tabla
+      quirúrgica. No es MEDINET.
+
+  # --- B2 ANEXO: intervenciones quirúrgicas codificadas -> EGRESOS -----
+  - region_id: B2_SURGICAL_INTERVENTIONS
+    sheet: "B2 ANEXO"
+    expected_source: EGRESOS
+    section_contains: "INTERVENCIONES QUIRÚRGICAS"
+    row_min: 1023
+    row_max: 2867
+    evidence: >-
+      cliente: códigos de intervención quirúrgica -> B2 ANEXO desde egresos
+      (Sprint 3.4, 6 inputs directos EGRESOS/CLIENT_CONFIRMED en el REMASEP final).
+      SheetLayout no expone la sección en el catálogo plano de B2, así que se usa
+      el rango de filas del bloque quirúrgico (A1023 'INTERVENCIONES QUIRÚRGICAS
+      NEUROCIRUGÍA' … fin de hoja) como evidencia de coordenada explícita.
+
+  # =========================================================================
+  # Regiones MEDINET (evidencia estructural positiva) — se evalúan al final
+  # =========================================================================
+
+  - region_id: OD_MEDINET_SUBGRAPH
+    sheet: "REMASEP_OD"
+    expected_source: MEDINET
+    section_contains: ""
+    row_min: null
+    row_max: null
+    evidence: >-
+      REMASEP_OD entero = odontología ambulatoria contada desde 'Atenciones';
+      el subgrafo legacy MEDINET del generador cubre toda esta hoja (Sprints 2–3)
+
+  - region_id: R01_MEDINET_CONSULTAS
+    sheet: "REMASEP 01"
+    expected_source: MEDINET
+    section_contains:
+      - "CONTROLES DE SALUD Y CONSULTAS DE MORBILIDAD"
+      - "CONSULTAS MÉDICAS"
+      - "ATENCIONES Y CONSULTAS POR OTROS PROFESIONALES"
+    row_min: null
+    row_max: null
+    evidence: >-
+      Secciones A/B/C de REMASEP 01 (controles, consultas médicas y de otros
+      profesionales) = atención ambulatoria contada desde 'Atenciones' por el
+      generador legacy (Sprints 2–3)

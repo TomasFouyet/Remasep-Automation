@@ -1,8 +1,9 @@
 # Estado del proyecto
 
-Vista de estado post Sprint 3.4 (capa semántica: inventario + mapeo de
-dimensiones + readiness técnica; delta del REMASEP final + provenance de fuente).
-Para el detalle por sprint ver [`docs/sprints/`](sprints/README.md).
+Vista de estado post Sprint 3.5 (capa semántica: inventario + mapeo de
+dimensiones + readiness técnica; delta del REMASEP final + provenance de fuente;
+alineación semántica con la plantilla oficial). Para el detalle por sprint ver
+[`docs/sprints/`](sprints/README.md).
 
 ## Fases
 
@@ -10,9 +11,9 @@ Para el detalle por sprint ver [`docs/sprints/`](sprints/README.md).
 | --- | --- | --- |
 | **1 — Reverse Engineering** | Inventario del workbook, dependencias, lógica legacy, plantilla oficial, UI shell | **COMPLETE** |
 | **2 — Medinet & Legacy Equivalence** | Ingesta Medinet real, `AC:AL`, agregaciones directas, cierre por dependencias, `SUM`/`IF` downstream | **COMPLETE** |
-| **3 — Semantic Metrics** | Inventario semántico (3.1 ✅), mapeo de dimensiones sexo/edad/alcance/código (3.2 ✅), readiness técnica + cola de revisión (3.3 ✅), delta del REMASEP final + provenance de fuente (3.4 ✅) | **IN PROGRESS** |
+| **3 — Semantic Metrics** | Inventario semántico (3.1 ✅), mapeo de dimensiones sexo/edad/alcance/código (3.2 ✅), readiness técnica + cola de revisión (3.3 ✅), delta del REMASEP final + provenance de fuente (3.4 ✅), alineación semántica con la plantilla oficial (3.5 ✅) | **IN PROGRESS** |
 | **4 — Additional Sources / Complete Dataset** | Adaptador de egresos, cálculo de recursos, dataset golden | PENDING |
-| **5 — Official Template Mapping** | Mapping semántico generador/Medinet → plantilla MINSAL | PENDING |
+| **5 — Official Template Mapping** | Mapping semántico generador/Medinet → plantilla MINSAL (alineación de candidatos hecha en 3.5; escritura Excel pendiente) | PENDING |
 | **6 — Excel Generation / CONTROL** | Escritura vía Excel COM (Windows), recálculo, verificación `CONTROL` | PENDING |
 | **7 — Pilot / Packaging** | Piloto manual + automático en paralelo, empaquetado `.exe` | PENDING |
 
@@ -84,7 +85,45 @@ Para el detalle por sprint ver [`docs/sprints/`](sprints/README.md).
   CANDIDATE_PENDING_SOURCE_COMPLETENESS`. **No** se automatiza ninguna fuente
   nueva. Ver
   [`docs/FINAL_REMASEP_DELTA_PROVENANCE.md`](FINAL_REMASEP_DELTA_PROVENANCE.md).
-- **3.5+ — dimensiones de actividad / especialidad** y traducción a la tabla
+- **3.5 — Official Template Semantic Alignment: ✅ COMPLETE.** Empareja cada
+  `SemanticMetric` MEDINET **elegible** (`readiness = AUTO_READY`) del generador
+  legacy con la(s) celda(s) de la plantilla oficial (`REMASEP_V1.4 Julio
+  2026.xlsm`), por **evidencia por dimensión** — nunca por coordenada (los dos
+  layouts difieren; 0 de 1122 matches EXACT tienen coordenada igual). Reglas
+  versionadas en `config/official_template_alignment_2026/`
+  (`status: preliminary_pending_functional_validation`). Resultado real: 1401
+  elegibles / 370 excluidos (5 `BLOCKED_CONFLICT` — **no** entran a AUTO mapping —
+  · 315 `ROLLUP_NOT_INPUT` · 50 `REVIEW_REQUIRED`); **1122
+  `EXACT_SEMANTIC_MATCH` · 245 `STRONG_MATCH` · 34 `AMBIGUOUS` · 0 `NO_MATCH` · 0
+  `CONFLICT`** (REMASEP_OD 952/170/34, REMASEP_01 165/75, B2_ANEXO 5 por código
+  de prestación). Regiones NO-MEDINET (`EGRESOS` / `RESOURCE_CALCULATION` /
+  `SURGICAL_TABLE` / `UNKNOWN`, Sprint 3.4) se excluyen del alignment; `REMASEP
+  B1` entero es `EGRESOS` (sin source MEDINET). **Revisión de cierre**: se separan
+  `target_kind` (qué es la celda) · `target_alignment_role` (`INPUT_TARGET` /
+  `DERIVED_TARGET` / `STRUCTURAL` / …) · `target_source_expectation` (default
+  `UNKNOWN`, no `MEDINET`). De los 11285 input targets: **5604 esperados de
+  MEDINET, 1367 alineados, 4237 genuinamente sin source**; fórmulas (1174) y
+  estructurales (4079) **no** son "targets MEDINET faltantes".
+  `approval_status = UNCONFIRMED`,
+  `candidate_golden_status = CANDIDATE_PENDING_SOURCE_COMPLETENESS`. **No**
+  escribe Excel, **no** COM. Ver
+  [`docs/OFFICIAL_TEMPLATE_SEMANTIC_ALIGNMENT.md`](OFFICIAL_TEMPLATE_SEMANTIC_ALIGNMENT.md).
+- **Hotfix producción — contrato de input Medinet & alcance de período: ✅
+  COMPLETE.** Formalizado: el input real de producción es el export directo
+  **"Detalle de citas"** de Medinet; `GENERACION DATOS REMASEP.xlsx` es sólo
+  referencia legacy (la app no depende de él). Bug corregido: la clasificación
+  legacy / edades corrían sobre **todos** los registros válidos; ahora sólo
+  sobre `processing_scope_records` = válidos ∩ mes/año. Los registros de otros
+  períodos no se descartan del archivo, sólo del cálculo; mensaje de UI
+  reformulado. Reconciliación privacy-safe (multiset) del archivo real:
+  `raw 11 501 · Julio 2114 · fuera 9 387`; los **1 364** activos del detalle
+  legacy son **subconjunto multiset exacto** (huella sin ESTADO) de los 2 114; la
+  diferencia de **750** = ESTADO. Hipótesis con evidencia de recuento exacto
+  (legacy conserva `{Atendido, Atención Pausada, En Sala de Espera, En
+  Atención}` = 1 364), marcada
+  `CURRENT_LEGACY_BEHAVIOR_PENDING_FUNCTIONAL_CONFIRMATION`, **no** implementada
+  como regla. Ver [`docs/MEDINET_INPUT_CONTRACT.md`](MEDINET_INPUT_CONTRACT.md).
+- **3.6+ — dimensiones de actividad / especialidad** y traducción a la tabla
   larga semántica: **pendiente**.
 - **Modelo de *provenance* / `source`**: `MEDINET` se aplica en 3.1–3.3; el delta
   del REMASEP final (3.4) clasifica `EGRESOS` / `RESOURCE_CALCULATION` /

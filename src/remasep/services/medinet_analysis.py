@@ -1,8 +1,17 @@
-"""Análisis REAL de un export Medinet (Sprint 2.1).
+"""Análisis REAL de un export Medinet (Sprint 2.1; alcance de período — hotfix 3.5).
 
-Lee un archivo Medinet, valida estructura y registros, detecta el período,
-calcula edades con la semántica legacy y aplica las 27 reglas candidatas de
-Sprint 1.3. **No** genera REMASEP, no escribe Excel, no usa COM.
+Lee un archivo Medinet **"Detalle de citas"** (el input real de producción), valida
+estructura y registros, detecta el período y — SOBRE EL ALCANCE DE PROCESAMIENTO
+del mes/año seleccionados — calcula edades con la semántica legacy y aplica las 27
+reglas candidatas de Sprint 1.3. **No** genera REMASEP, no escribe Excel, no usa COM.
+
+Alcance de procesamiento (`processing_scope_records`) = registros
+**estructuralmente válidos** ∩ **dentro del mes/año**. Un export Medinet suele
+traer varios meses; los registros de otros períodos NO se descartan del archivo,
+pero quedan **fuera** de todas las métricas y clasificaciones del REMASEP mensual.
+
+`GENERACION DATOS REMASEP.xlsx` **no** es un input de la app: es una referencia
+legacy de ingeniería inversa (ver `docs/MEDINET_INPUT_CONTRACT.md`).
 
 Privacidad: los valores de las filas se procesan solo en memoria. Nada que salga
 de aquí (problems, validations, diagnostics, notes) contiene RUN, nombre, fecha
@@ -78,9 +87,16 @@ class MedinetAnalysisResult:
     invalid_records: int
     records_in_period: int
     records_outside_period: int
+    # Alcance de procesamiento del REMASEP mensual = registros ESTRUCTURALMENTE
+    # VÁLIDOS **y** dentro del mes/año seleccionados. Todas las métricas y
+    # clasificaciones mensuales se calculan SOLO sobre este subconjunto; los
+    # registros de otros períodos no se descartan del archivo, sólo quedan fuera
+    # del cálculo.
+    processing_scope_records: int
     min_service_date: str | None
     max_service_date: str | None
 
+    # Clasificación legacy y edades: calculadas sobre `processing_scope_records`.
     legacy_matches_total: int
     non_target_records: int
     legacy_counts: dict[str, int]
@@ -114,6 +130,18 @@ class MedinetAnalysisResult:
                 "MedinetAnalysisResult inconsistente: "
                 f"total_records={self.total_records} != "
                 f"valid_records={self.valid_records} + invalid_records={self.invalid_records}"
+            )
+        if self.processing_scope_records > self.valid_records:
+            raise ValueError(
+                "MedinetAnalysisResult inconsistente: "
+                f"processing_scope_records={self.processing_scope_records} > "
+                f"valid_records={self.valid_records}"
+            )
+        if self.legacy_matches_total + self.non_target_records != self.processing_scope_records:
+            raise ValueError(
+                "MedinetAnalysisResult inconsistente: la clasificación legacy "
+                f"({self.legacy_matches_total} + {self.non_target_records}) no cubre "
+                f"processing_scope_records={self.processing_scope_records}"
             )
 
     @property
@@ -227,17 +255,7 @@ class MedinetAnalysisService:
         valid_mask = active & ~invalid_mask
         birth_after = active & (~dia.isna()) & (~fnac_blank) & (~fnac.isna()) & (fnac > dia)
 
-        # --- edad (semántica DATEDIF "Y" + excepción legacy) ---------------
-        # Ver `legacy_age_years` para la definición por fila; aquí solo se
-        # agregan conteos (el valor individual nunca sale del servicio).
-        computable = active & (~dia.isna()) & (~fnac_blank) & (~fnac.isna())
-        ages = _AgeBreakdown(
-            computed=int((computable & ~birth_after).sum()),
-            legacy_zero=int(birth_after.sum()),
-        )
-        ages.missing = total - ages.computed - ages.legacy_zero
-
-        # --- período -----------------------------------------------------
+        # --- período y alcance de procesamiento -------------------------
         valid_dates = dia[valid_mask]
         in_period_mask = (valid_dates.dt.year == period.year) & (
             valid_dates.dt.month == period.month
@@ -247,11 +265,29 @@ class MedinetAnalysisService:
         min_date = _iso_date(valid_dates.min()) if len(valid_dates) else None
         max_date = _iso_date(valid_dates.max()) if len(valid_dates) else None
 
-        # --- reglas legacy (solo registros válidos) ---------------------
+        # `scope_mask`: registro estructuralmente válido Y dentro del mes/año.
+        # Es el ÚNICO subconjunto sobre el que se calcula el REMASEP mensual.
+        scope_mask = (
+            valid_mask
+            & dia.dt.year.eq(period.year)
+            & dia.dt.month.eq(period.month)
+        ).fillna(False).astype(bool)
+        processing_scope_records = int(scope_mask.sum())
+
+        # --- edad (semántica DATEDIF "Y" + excepción legacy) ---------------
+        # Sólo sobre el alcance de procesamiento; el valor individual nunca sale.
+        computable = scope_mask & (~fnac_blank) & (~fnac.isna())
+        ages = _AgeBreakdown(
+            computed=int((computable & ~birth_after).sum()),
+            legacy_zero=int((scope_mask & birth_after).sum()),
+        )
+        ages.missing = processing_scope_records - ages.computed - ages.legacy_zero
+
+        # --- reglas legacy (SOLO el alcance de procesamiento) ----------
         legacy_counts = {code: 0 for code in self._rules.codes}
         legacy_matches_total = 0
         non_target_records = 0
-        for pos in frame.index[valid_mask]:
+        for pos in frame.index[scope_mask]:
             codes = self._rules.classify(
                 {
                     "TIPO_DE_CITA": frame.at[pos, "TIPO_DE_CITA"],
@@ -323,7 +359,9 @@ class MedinetAnalysisService:
                 "ok",
                 f"{len(medinet.detected_fields)} columnas semánticas reconocidas",
             ),
-            self._period_validation(period, total, records_in_period, records_outside_period),
+            self._period_validation(
+                period, total, records_in_period, records_outside_period
+            ),
             (
                 ValidationResult(
                     "Fechas válidas", "warning", f"{date_problem_count} fecha(s) con problemas"
@@ -334,7 +372,8 @@ class MedinetAnalysisService:
             ValidationResult(
                 "Clasificación legacy ejecutada",
                 "ok",
-                f"{self._rules.version} (pendiente de validación funcional)",
+                f"{self._rules.version} sobre {processing_scope_records} registro(s) "
+                f"de {period.label} (pendiente de validación funcional)",
             ),
         ]
 
@@ -365,6 +404,13 @@ class MedinetAnalysisService:
                 f"Diagnóstico informativo: {prestacion_empty} registro(s) con PRESTACION "
                 "vacía (no es obligatoria; no genera problema)."
             )
+        if records_outside_period:
+            notes.append(
+                f"{records_outside_period} registro(s) válidos pertenecen a otros "
+                f"períodos y NO se incluyen en el REMASEP de {period.label}. No se "
+                f"descartan del archivo; sólo quedan fuera del cálculo. Alcance de "
+                f"procesamiento: {processing_scope_records} registro(s)."
+            )
 
         return MedinetAnalysisResult(
             analysis_mode=ANALYSIS_MODE_REAL,
@@ -380,6 +426,7 @@ class MedinetAnalysisService:
             invalid_records=invalid_records,
             records_in_period=records_in_period,
             records_outside_period=records_outside_period,
+            processing_scope_records=processing_scope_records,
             min_service_date=min_date,
             max_service_date=max_date,
             legacy_matches_total=legacy_matches_total,
@@ -410,10 +457,14 @@ class MedinetAnalysisService:
                 f"Ningún registro válido corresponde a {period.label}",
             )
         if outside:
+            # NO es un error ni una advertencia: es lo esperado en un archivo
+            # multi-mes. Esos registros pertenecen a otros períodos y quedan
+            # fuera del REMASEP del mes, sin descartarse del archivo.
             return ValidationResult(
                 "Período correcto",
-                "warning",
-                f"{outside} registro(s) válidos fuera de {period.label} (no se descartan)",
+                "ok",
+                f"{outside} registro(s) pertenecen a otros períodos y no se "
+                f"incluirán en el REMASEP de {period.label}",
             )
         return ValidationResult("Período correcto", "ok", period.label)
 

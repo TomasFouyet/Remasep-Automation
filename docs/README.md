@@ -21,6 +21,10 @@
 
 ## Data Sources
 
+- [`MEDINET_INPUT_CONTRACT.md`](MEDINET_INPUT_CONTRACT.md) — **input de producción**
+  = export directo Medinet "Detalle de citas"; `GENERACION DATOS REMASEP.xlsx` es
+  sólo referencia legacy. Alcance de período (`processing_scope_records`) y
+  reconciliación privacy-safe 2114 vs 1364 (hipótesis de ESTADO, no regla).
 - [`TECHNICAL_OVERVIEW.md`](TECHNICAL_OVERVIEW.md) → *Fuentes de datos* —
   MEDINET · EGRESOS · TABLA QUIRÚRGICA / RESOURCE CALCULATION · OFFICIAL TEMPLATE.
 - [`TECHNICAL_OVERVIEW.md`](TECHNICAL_OVERVIEW.md) → *Modelo futuro de métricas* —
@@ -68,11 +72,21 @@
   `SURGICAL_TABLE` · `CONTROL_METADATA` · `UNKNOWN_PENDING` · `MIXED_DERIVED`).
   32-vs-31 = `OPEN_FUNCTIONAL_QUESTION`; `candidate_golden_status =
   CANDIDATE_PENDING_SOURCE_COMPLETENESS`. *No automatiza ninguna fuente nueva.*
+- [`OFFICIAL_TEMPLATE_SEMANTIC_ALIGNMENT.md`](OFFICIAL_TEMPLATE_SEMANTIC_ALIGNMENT.md)
+  — Sprint 3.5: empareja las métricas MEDINET elegibles (`AUTO_READY`) con celdas
+  de la plantilla oficial por **evidencia por dimensión**, no por coordenada
+  (1122 `EXACT` / 245 `STRONG` / 34 `AMBIGUOUS` de 1401 elegibles). Regiones
+  NO-MEDINET (EGRESOS / recursos / tabla quirúrgica) excluidas; `REMASEP B1`
+  entero es EGRESOS. Reglas en `config/official_template_alignment_2026/`.
+  *No escribe Excel; un match ≠ validado MINSAL.*
 
-## Official Template (Fase 5, pendiente)
+## Official Template (Fase 5, en curso)
 
+- [`OFFICIAL_TEMPLATE_SEMANTIC_ALIGNMENT.md`](OFFICIAL_TEMPLATE_SEMANTIC_ALIGNMENT.md)
+  — Sprint 3.5: alineación semántica de candidatos generador → plantilla oficial
+  (sin escritura Excel).
 - [`TEMPLATE_ALIGNMENT.md`](TEMPLATE_ALIGNMENT.md) — estructura de
-  `REMASEP 2026_V1.4.xlsm` y candidatos de alineación (mapping NO implementado).
+  `REMASEP 2026_V1.4.xlsm` y candidatos de alineación por etiqueta (Sprint 1.4).
 
 ## Sprints
 
