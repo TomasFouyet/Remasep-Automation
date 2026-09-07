@@ -49,8 +49,12 @@
 
 - [`SEMANTIC_METRIC_INVENTORY.md`](SEMANTIC_METRIC_INVENTORY.md) — Sprint 3.1:
   rótulos de sección / fila / columna por métrica, `semantic_signature`
-  candidata, evidencia de fórmula, `source = "MEDINET"`. *No es un mapping
-  validado.*
+  candidata, evidencia de fórmula, `source = "MEDINET"`.
+- [`SEMANTIC_METRIC_MAPPING.md`](SEMANTIC_METRIC_MAPPING.md) — Sprint 3.2:
+  dimensiones explícitas (sexo, edad, alcance de agregación, código de
+  procedimiento) con `value` + `status` + `evidence`; vocabulario versionado en
+  `config/semantic_mapping_2026/`. *No es un mapping a la plantilla oficial ni
+  validación funcional.*
 
 ## Official Template (Fase 5, pendiente)
 

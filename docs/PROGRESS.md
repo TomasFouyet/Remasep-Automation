@@ -1,7 +1,8 @@
 # Estado del proyecto
 
-Vista de estado post Sprint 3.1 (inicio de la capa semántica). Para el detalle
-por sprint ver [`docs/sprints/`](sprints/README.md).
+Vista de estado post Sprint 3.2 (capa semántica: inventario + mapeo de
+dimensiones). Para el detalle por sprint ver
+[`docs/sprints/`](sprints/README.md).
 
 ## Fases
 
@@ -9,7 +10,7 @@ por sprint ver [`docs/sprints/`](sprints/README.md).
 | --- | --- | --- |
 | **1 — Reverse Engineering** | Inventario del workbook, dependencias, lógica legacy, plantilla oficial, UI shell | **COMPLETE** |
 | **2 — Medinet & Legacy Equivalence** | Ingesta Medinet real, `AC:AL`, agregaciones directas, cierre por dependencias, `SUM`/`IF` downstream | **COMPLETE** |
-| **3 — Semantic Metrics** | Inventario semántico (3.1 ✅), dimensiones clínicas (3.2), modelo con *provenance* | **IN PROGRESS** |
+| **3 — Semantic Metrics** | Inventario semántico (3.1 ✅), mapeo de dimensiones sexo/edad/alcance/código (3.2 ✅), modelo con *provenance* | **IN PROGRESS** |
 | **4 — Additional Sources / Complete Dataset** | Adaptador de egresos, cálculo de recursos, dataset golden | PENDING |
 | **5 — Official Template Mapping** | Mapping semántico generador/Medinet → plantilla MINSAL | PENDING |
 | **6 — Excel Generation / CONTROL** | Escritura vía Excel COM (Windows), recálculo, verificación `CONTROL` | PENDING |
@@ -40,12 +41,22 @@ por sprint ver [`docs/sprints/`](sprints/README.md).
 
 - **3.1 — Semantic Metric Inventory: ✅ COMPLETE.** 1771 métricas candidatas,
   1741 `COMPLETE` / 30 `PARTIAL` / 0 `AMBIGUOUS` / 0 `NO_CONTEXT`, 0 firmas
-  duplicadas, 0 conflictos rótulo/fórmula. **No** es un mapping validado: no hay
-  dimensiones clínicas todavía.
-- **3.2 — dimensiones clínicas** (traducir los rótulos a sexo / grupo de edad /
-  actividad / especialidad): **pendiente**.
-- **Modelo de *provenance* / `source`**: `MEDINET` ya se aplica en el inventario
-  de 3.1; `EGRESOS` / `RESOURCE_CALCULATION` quedan como requisito de diseño.
+  duplicadas. Ver
+  [`docs/SEMANTIC_METRIC_INVENTORY.md`](SEMANTIC_METRIC_INVENTORY.md).
+- **3.2 — Semantic Metric Mapping: ✅ COMPLETE.** 1771 `SemanticMetric` con
+  dimensiones explícitas (sexo / edad / alcance de agregación / código de
+  procedimiento), cada una con `value` + `status` + `evidence`. Resultado real:
+  1414 `mapping_status=CONFIRMED` · 352 `PARTIAL` · 5 `CONFLICT` (reales, del
+  workbook: columna `Mujeres` con fórmula `"*Hombre*"` en `REMASEP 01`).
+  597 códigos de procedimiento explícitos (19 distintos). Vocabulario versionado
+  en `config/semantic_mapping_2026/`
+  (`status: preliminary_pending_functional_validation`). Ver
+  [`docs/SEMANTIC_METRIC_MAPPING.md`](SEMANTIC_METRIC_MAPPING.md).
+- **3.3+ — dimensiones de actividad / especialidad** y traducción a la tabla
+  larga semántica: **pendiente**.
+- **Modelo de *provenance* / `source`**: `MEDINET` se aplica en 3.1 y 3.2;
+  `EGRESOS` / `RESOURCE_CALCULATION` quedan preparados conceptualmente, sin
+  código.
 
 ## Pre-Sprint 3 — inventario de fuentes / golden dataset (pendiente en paralelo)
 
@@ -62,8 +73,9 @@ fuentes reales:
 
 ## Luego
 
-- **Sprint 3.2 — dimensiones semánticas**: traducir `semantic_signature` a
-  `formulario · categoría · especialidad · sexo · edad · modalidad · valor`,
+- **Sprint 3.3+ — dimensiones de actividad / especialidad**: traducir
+  `semantic_signature` + `row_path` a `formulario · categoría · especialidad ·
+  sexo · edad · modalidad · valor`,
   usando la evidencia de fórmula de 3.1.
 - Semantic mapping hacia la plantilla oficial.
 - Adaptador de egresos + cálculo de recursos.

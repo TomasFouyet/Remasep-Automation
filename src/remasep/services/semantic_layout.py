@@ -268,7 +268,14 @@ class SheetLayout:
 
     def _group_header(self, row: int, col: int, section_row: int) -> list[str]:
         """Nivel de fila intermedio: el encabezado de grupo MÁS CERCANO por encima
-        (``A.4. …``), sin cruzar otro grupo ni la sección."""
+        (``A.4. …``), sin cruzar otro grupo ni la sección.
+
+        Si la celda está **sobre** su propia fila-encabezado (sección o grupo) no
+        hay grupo *padre*: la fila es el subtotal de ese encabezado y su rótulo
+        lo aporta ``_leaf_row_labels``. Evita arrastrar un grupo hermano previo
+        (p.ej. ``A.3.`` recibiendo ``A.1.``)."""
+        if row in self._group_rows or row in self._section_rows:
+            return []
         label_col = next((cc for cc in range(1, col) if self.is_text(row, cc)), 2)
         for rr in range(row - 1, section_row, -1):
             if self._is_wide_header_row(rr) or rr in self._section_rows:
@@ -362,8 +369,8 @@ class SheetLayout:
 # ---------------------------------------------------------------------------
 
 _AGE_PATTERNS: tuple[tuple[re.Pattern[str], object], ...] = (
-    (re.compile(r"^MENOS DE 1 ANO\s*-\s*1 ANO$"), lambda m: (0, 1)),
-    (re.compile(r"^MENOS DE\s*(\d+)\s*ANOS?$"), lambda m: (None, int(m.group(1)) - 1)),
+    (re.compile(r"^MEN(?:OS|OR) DE 1 ANO\s*-\s*1 ANO$"), lambda m: (0, 1)),
+    (re.compile(r"^MEN(?:OS|OR) DE\s*(\d+)\s*ANOS?$"), lambda m: (None, int(m.group(1)) - 1)),
     (re.compile(r"(\d+)\s*Y\s*MAS\s*ANOS?"), lambda m: (int(m.group(1)), None)),
     (re.compile(r"^(\d+)\s*[-A]\s*(\d+)\s*ANOS?$"), lambda m: (int(m.group(1)), int(m.group(2)))),
     (re.compile(r"^(\d+)\s*-\s*(\d+)$"), lambda m: (int(m.group(1)), int(m.group(2)))),
@@ -390,6 +397,12 @@ def parse_age_label(text: object) -> tuple[int | None, int | None] | None:
         if match:
             return build(match)  # type: ignore[operator]
     return None
+
+
+def is_group_header_label(text: object) -> bool:
+    """¿El texto tiene forma de encabezado de grupo del formato MINSAL
+    (``A.1. …``, ``A.- …``, ``B - …``)?  Heurística de layout, no semántica."""
+    return bool(_GROUP_HEADER_RE.match(str(text or "")))
 
 
 def age_bounds_from_formula(formula: object) -> tuple[int | None, int | None] | None:

@@ -229,6 +229,35 @@ def test_group_header_is_row_level_when_section_keyword_present():
     assert ctx.row_labels_raw == ("A.4. ACTIVIDADES GENERALES", "COD-9", "Obturación")
 
 
+def test_metric_on_group_header_row_does_not_pull_sibling_group():
+    # Regresión (Sprint 3.2): REMASEP_OD!AA12 arrastraba "A.1." al ser el
+    # subtotal de "A.3.", que es un grupo HERMANO (no anidado).
+    ws = _sheet()
+    ws["B1"] = "SECCIÓN A: ODONTOLOGÍA"
+    ws["B1"].font = _BOLD
+    ws["B3"] = "A.1. CONSULTAS Y ALTAS"
+    ws["B3"].font = _BOLD
+    ws["C3"] = 5                         # A.1 es una fila-métrica (subtotal)
+    ws["A4"] = "COD-1"
+    ws["B4"] = "Detalle de A.1"
+    ws["C4"] = 2
+    ws["B6"] = "A.3. ACCIONES GENERALES"
+    ws["B6"].font = _BOLD
+    ws["C6"] = 8                         # A.3: hermana de A.1, también fila-métrica
+    ws["A7"] = "COD-2"
+    ws["B7"] = "Detalle de A.3"
+    ws["C7"] = 3
+    layout = SheetLayout(ws)
+    # métrica SOBRE la fila-encabezado A.3 -> sólo A.3 (sin arrastrar A.1)
+    assert layout.cell_context("C6").row_labels_raw == ("A.3. ACCIONES GENERALES",)
+    # métrica SOBRE la fila-encabezado A.1 -> sólo A.1
+    assert layout.cell_context("C3").row_labels_raw == ("A.1. CONSULTAS Y ALTAS",)
+    # detalle DENTRO de A.3 -> A.3 sí es su grupo padre (comportamiento correcto)
+    assert layout.cell_context("C7").row_labels_raw == (
+        "A.3. ACCIONES GENERALES", "COD-2", "Detalle de A.3",
+    )
+
+
 def test_merged_row_label():
     ws = _sheet()
     ws["C1"] = "Hombres"

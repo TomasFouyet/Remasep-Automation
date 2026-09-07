@@ -200,7 +200,7 @@ suficiente (Sprint 3.2 añadirá dimensiones).
 | profundidad máx. jerarquía | filas 3 · columnas 3 · secciones 2 |
 | métricas con cotas de edad detectables | 1393 |
 | métricas con criterios de texto | 1191 |
-| rótulo ↔ fórmula | **CONSISTENT 1389** · CONFLICT **0** · NO_COMPARABLE 197 (185 sin edad en ningún lado) |
+| rótulo ↔ fórmula | **CONSISTENT 1391** · CONFLICT **0** · NO_COMPARABLE 196 (184 sin edad en ningún lado) |
 | validaciones | 272 (todas `PARTIAL`; 136 referencian `EMBARAZADAS`, 136 `MIGRANTES`) |
 
 - Las 30 `PARTIAL` son **todo `B2 ANEXO`**: es una lista plana con una única

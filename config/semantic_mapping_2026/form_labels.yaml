@@ -1,0 +1,16 @@
+# =============================================================================
+# Mapeo de HOJA -> identificador interno de formulario — Sprint 3.2
+# =============================================================================
+#
+# Inferencia directa y segura desde el nombre de hoja del workbook legacy.
+# El nombre raw de hoja se conserva siempre en la salida (`form_raw`).
+
+version: semantic_mapping_2026
+status: preliminary_pending_functional_validation
+disclaimer: >-
+  Identificadores internos estables, no nombres oficiales MINSAL.
+
+forms:
+  "REMASEP 01": REMASEP_01
+  "B2 ANEXO": B2_ANEXO
+  "REMASEP_OD": REMASEP_OD

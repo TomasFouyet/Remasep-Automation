@@ -1,0 +1,38 @@
+# =============================================================================
+# Mapeo de rótulos de SEXO — Sprint 3.2 (Semantic Metric Mapping)
+# =============================================================================
+#
+# Vocabulario explícito y versionado de los rótulos de sexo observados en las
+# hojas REMASEP 01 / B2 ANEXO / REMASEP_OD de `GENERACION DATOS REMASEP.xlsx`.
+# El matching es por rótulo NORMALIZADO (mayúsculas, sin tildes, whitespace
+# colapsado — `remasep.services.semantic_layout.normalize_semantic_label`),
+# NO por substring arbitrario.
+#
+# `formula_criteria` son los patrones de texto (`"*Hombre*"`, `"*Mujer*"`) que,
+# si aparecen como criterio de un COUNTIF(S), aportan evidencia de fórmula.
+
+version: semantic_mapping_2026
+status: preliminary_pending_functional_validation
+disclaimer: >-
+  Mapeo preliminar de rótulos observados. Pendiente de validación funcional por
+  Fundación Gantz / MINSAL. NO es vocabulario oficial MINSAL.
+
+# rótulo (raw, tal cual aparece) -> valor interno
+labels:
+  MALE:
+    - "Hombres"
+    - "Hombre"
+  FEMALE:
+    - "Mujeres"
+    - "Mujer"
+  BOTH:
+    - "Ambos sexos"
+    - "Ambos sexo"
+    - "Ambos Sexos"
+
+# substrings (normalizados, en minúscula) dentro de un criterio "*...*"
+formula_criteria:
+  MALE:
+    - "hombre"
+  FEMALE:
+    - "mujer"

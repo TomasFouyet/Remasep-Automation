@@ -79,6 +79,7 @@ class MetricContext:
     semantic_signature: str
     context_status: str
     notes: tuple[str, ...] = ()
+    formula: str = ""
     # evidencia de fórmula
     referenced_detail_columns: tuple[str, ...] = ()
     text_criteria: tuple[str, ...] = ()
@@ -227,6 +228,7 @@ def build_inventory(path: str | Path) -> InventoryResult:
                 semantic_signature=ctx.semantic_signature(),
                 context_status=ctx.context_status,
                 notes=ctx.notes,
+                formula=node.formula if isinstance(node.formula, str) else "",
                 **evidence,
             )
         )

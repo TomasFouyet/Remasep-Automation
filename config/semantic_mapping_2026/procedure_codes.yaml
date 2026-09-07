@@ -1,0 +1,26 @@
+# =============================================================================
+# Reglas de extracción de CÓDIGO DE PROCEDIMIENTO — Sprint 3.2
+# =============================================================================
+#
+# Un código de procedimiento sólo se extrae cuando es EXPLÍCITO en un rótulo de
+# fila del workbook, con una de estas dos formas:
+#
+#   1. "<CÓDIGO> - <NOMBRE>"   (código y nombre en la misma celda-rótulo)
+#      p.ej. "5010009 - VIDRIO IONÓMERO" -> code="5010009", label="VIDRIO IONÓMERO"
+#
+#   2. "<CÓDIGO>"  seguido de otro rótulo de fila con el nombre
+#      (patrón de B2 ANEXO: el código en una celda, el nombre en la siguiente)
+#      p.ej. "0601105" + "Atención Kinesiológica…" -> code="0601105", label="Atención Kinesiológica…"
+#
+# Un CÓDIGO es una secuencia de `min_digits`..`max_digits` dígitos. Números
+# incidentales (rangos de edad "20 A 24", sufijos ".38:51", etc.) NO se
+# extraen. No se afirma a qué catálogo oficial pertenece el código.
+
+version: semantic_mapping_2026
+status: preliminary_pending_functional_validation
+disclaimer: >-
+  Extracción sintáctica de códigos visibles. No se valida contra ningún
+  catálogo oficial (FONASA / MINSAL). Pendiente de confirmación funcional.
+
+min_digits: 4
+max_digits: 8
