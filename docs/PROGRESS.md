@@ -1,7 +1,7 @@
 # Estado del proyecto
 
-Vista de estado post Sprint 3.2 (capa semántica: inventario + mapeo de
-dimensiones). Para el detalle por sprint ver
+Vista de estado post Sprint 3.3 (capa semántica: inventario + mapeo de
+dimensiones + readiness técnica). Para el detalle por sprint ver
 [`docs/sprints/`](sprints/README.md).
 
 ## Fases
@@ -10,7 +10,7 @@ dimensiones). Para el detalle por sprint ver
 | --- | --- | --- |
 | **1 — Reverse Engineering** | Inventario del workbook, dependencias, lógica legacy, plantilla oficial, UI shell | **COMPLETE** |
 | **2 — Medinet & Legacy Equivalence** | Ingesta Medinet real, `AC:AL`, agregaciones directas, cierre por dependencias, `SUM`/`IF` downstream | **COMPLETE** |
-| **3 — Semantic Metrics** | Inventario semántico (3.1 ✅), mapeo de dimensiones sexo/edad/alcance/código (3.2 ✅), modelo con *provenance* | **IN PROGRESS** |
+| **3 — Semantic Metrics** | Inventario semántico (3.1 ✅), mapeo de dimensiones sexo/edad/alcance/código (3.2 ✅), readiness técnica + cola de revisión (3.3 ✅), modelo con *provenance* | **IN PROGRESS** |
 | **4 — Additional Sources / Complete Dataset** | Adaptador de egresos, cálculo de recursos, dataset golden | PENDING |
 | **5 — Official Template Mapping** | Mapping semántico generador/Medinet → plantilla MINSAL | PENDING |
 | **6 — Excel Generation / CONTROL** | Escritura vía Excel COM (Windows), recálculo, verificación `CONTROL` | PENDING |
@@ -52,9 +52,21 @@ dimensiones). Para el detalle por sprint ver
   en `config/semantic_mapping_2026/`
   (`status: preliminary_pending_functional_validation`). Ver
   [`docs/SEMANTIC_METRIC_MAPPING.md`](SEMANTIC_METRIC_MAPPING.md).
-- **3.3+ — dimensiones de actividad / especialidad** y traducción a la tabla
+- **3.3 — Semantic Mapping Validation & Readiness: ✅ COMPLETE.** Capa técnica de
+  *readiness* sobre `SemanticMetric` (no cambia las inferencias de 3.2). Policy
+  versionada en `config/semantic_validation_2026/`
+  (`status: preliminary_pending_functional_validation`). Resultado real sobre las
+  1771 métricas: **1401 `AUTO_READY` · 50 `REVIEW_REQUIRED` · 5
+  `BLOCKED_CONFLICT` · 315 `NOT_APPLICABLE`** (roll-ups del workbook).
+  Issues: 5 `BLOCKING` / 69 `REVIEW` / 1360 `INFO`, 13 clusters. Los 5 conflictos
+  reales (`REMASEP 01!AB84/AB86/AB87/AB89/AB90`) quedan `BLOCKED_CONFLICT` con
+  `recommended_action = HUMAN_REVIEW` — **no se corrigen**, sólo se clasifican.
+  `overrides.yaml` vacío (arquitectura, sin resolución). `AUTO_READY` ≠ validado
+  MINSAL. Ver
+  [`docs/SEMANTIC_MAPPING_VALIDATION.md`](SEMANTIC_MAPPING_VALIDATION.md).
+- **3.4+ — dimensiones de actividad / especialidad** y traducción a la tabla
   larga semántica: **pendiente**.
-- **Modelo de *provenance* / `source`**: `MEDINET` se aplica en 3.1 y 3.2;
+- **Modelo de *provenance* / `source`**: `MEDINET` se aplica en 3.1–3.3;
   `EGRESOS` / `RESOURCE_CALCULATION` quedan preparados conceptualmente, sin
   código.
 
@@ -73,7 +85,7 @@ fuentes reales:
 
 ## Luego
 
-- **Sprint 3.3+ — dimensiones de actividad / especialidad**: traducir
+- **Sprint 3.4+ — dimensiones de actividad / especialidad**: traducir
   `semantic_signature` + `row_path` a `formulario · categoría · especialidad ·
   sexo · edad · modalidad · valor`,
   usando la evidencia de fórmula de 3.1.

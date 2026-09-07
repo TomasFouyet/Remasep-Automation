@@ -1,0 +1,56 @@
+# =============================================================================
+# Política de VALIDACIÓN / READINESS del mapeo semántico — Sprint 3.3
+# =============================================================================
+#
+# Capa técnica sobre `SemanticMetric` (Sprint 3.2). Responde, por métrica:
+#   ¿puede usarse automáticamente? / ¿necesita revisión? / ¿debe bloquearse?
+#
+# `readiness_status` ∈ AUTO_READY · REVIEW_REQUIRED · BLOCKED_CONFLICT ·
+# NOT_APPLICABLE — NO se confunde con `mapping_status`
+# (CONFIRMED / PARTIAL / CONFLICT) de Sprint 3.2.
+#
+# `AUTO_READY` significa **únicamente** "suficiente evidencia técnica según esta
+# policy". NO significa "validado MINSAL" ni "aprobado por el cliente".
+
+version: semantic_validation_2026
+status: preliminary_pending_functional_validation
+disclaimer: >-
+  Reglas técnicas observables sobre el workbook de referencia, no requisitos
+  clínicos. Pendiente de validación funcional por Fundación Gantz / MINSAL.
+
+# Alcances de agregación que son roll-ups que el propio workbook calcula a partir
+# de las celdas DETAIL: no son puntos de ingreso desde Medinet, así que su
+# readiness es NOT_APPLICABLE (salvo que tengan un CONFLICT, que siempre bloquea).
+rollup_scopes: [TOTAL, SUBTOTAL]
+
+# Dimensiones requeridas para AUTO_READY, por formulario y bucket de alcance
+# (DETAIL = celda de dato; ROLLUP = total/subtotal). Justificación: la grilla de
+# REMASEP_OD y REMASEP 01 desagrega por sexo y/o edad; B2 ANEXO es una lista
+# plana de prestaciones sin esos ejes pero con código de prestación.
+required_dimensions:
+  default:
+    DETAIL: [form, row_path, aggregation_scope]
+    ROLLUP: [form, row_path, aggregation_scope]
+  by_form:
+    REMASEP_OD:
+      DETAIL: [form, row_path, aggregation_scope, sex, age]
+    REMASEP_01:
+      DETAIL: [form, row_path, aggregation_scope, sex, age]
+    B2_ANEXO:
+      DETAIL: [form, row_path, aggregation_scope, procedure]
+
+# Estados de una dimensión que NO bloquean AUTO_READY cuando esa dimensión es
+# requerida. Una dimensión requerida con `NOT_APPLICABLE` es aceptable (el eje no
+# aplica a esa métrica); con `LABEL_ONLY` / `FORMULA_ONLY` / `UNRESOLVED` genera
+# un issue de severidad REVIEW.
+acceptable_status:
+  default: [CONFIRMED, NOT_APPLICABLE]
+  procedure: [EXPLICIT, NOT_APPLICABLE]
+  form: [RESOLVED]
+  row_path: [RESOLVED]
+
+# Severidad del issue según impacto.
+severity:
+  conflict: BLOCKING
+  required_dimension: REVIEW
+  non_required_dimension: INFO

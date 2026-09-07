@@ -1,0 +1,28 @@
+# =============================================================================
+# Decisiones humanas explícitas sobre excepciones del mapeo semántico — Sprint 3.3
+# =============================================================================
+#
+# Arquitectura preparada, **sin ninguna decisión cargada todavía**. En el futuro,
+# una revisión humana podrá resolver de forma AUDITABLE una excepción del mapeo
+# (p.ej. un `BLOCKED_CONFLICT`) sin tocar el workbook, la fórmula, el label ni el
+# motor legacy.
+#
+# Identidad del override: `metric_signature` (independiente de coordenadas). El
+# `cell` se conserva sólo como trazabilidad.
+#
+# Formato de cada entrada:
+#   - metric_signature: "REMASEP 01 :: SECCION C: ... :: MUJERES"   # obligatorio
+#     cell: "REMASEP 01!AB84"          # sólo trazabilidad, opcional
+#     decision: REVIEW_PENDING | ACCEPT_AS_IS | ...
+#     reason: "..."                    # por qué
+#     evidence: "..."                  # evidencia que respalda la decisión
+#     approved_by: "..."
+#     approved_date: "YYYY-MM-DD"
+#
+# NO se incluyen aquí los 5 conflictos reales (AB84/AB86/AB87/AB89/AB90): son
+# evidencia de discrepancia del workbook y quedan como `BLOCKED_CONFLICT` hasta
+# que exista una decisión humana explícita.
+
+version: semantic_validation_2026
+status: preliminary_pending_functional_validation
+overrides: []

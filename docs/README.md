@@ -55,6 +55,12 @@
   procedimiento) con `value` + `status` + `evidence`; vocabulario versionado en
   `config/semantic_mapping_2026/`. *No es un mapping a la plantilla oficial ni
   validación funcional.*
+- [`SEMANTIC_MAPPING_VALIDATION.md`](SEMANTIC_MAPPING_VALIDATION.md) — Sprint 3.3:
+  capa técnica de *readiness* sobre `SemanticMetric` — `AUTO_READY` /
+  `REVIEW_REQUIRED` / `BLOCKED_CONFLICT` / `NOT_APPLICABLE`; policy versionada en
+  `config/semantic_validation_2026/`; cola de revisión y clusters; los 5
+  conflictos reales quedan `BLOCKED_CONFLICT` con `recommended_action =
+  HUMAN_REVIEW`. *`AUTO_READY` ≠ validado MINSAL.*
 
 ## Official Template (Fase 5, pendiente)
 
