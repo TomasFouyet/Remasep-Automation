@@ -14,10 +14,13 @@ REMASEP oficial.
 from __future__ import annotations
 
 import shutil
+import time
+import uuid
 import zipfile
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Protocol
 
@@ -28,10 +31,28 @@ from remasep.services.metric_value_producer import (
     EXPECTED_INTEGER_COUNT,
     PendingWrite,
 )
+from remasep.services.vba_integrity import (
+    VbaComparison,
+    VbaProject,
+    compare_vba_projects,
+    read_vba_project,
+)
 from remasep.services.workbook_delta import compute_sha256
 from remasep.services.writable_target_mapping import structural_template_fingerprint
 
 _VBA_ENTRY = "xl/vbaProject.bin"
+
+# Puntos de inyección para tests (reales en producción).
+_sleep = time.sleep
+_monotonic = time.monotonic
+
+# --- workspace temporal por corrida ---------------------------------
+_TMP_DIRNAME = ".remasep-tmp"
+CLEANUP_OK = "CLEANUP_OK"
+CLEANUP_PENDING = "CLEANUP_PENDING"
+CLEANUP_REFUSED = "CLEANUP_REFUSED_OUT_OF_WORKSPACE"
+_PROMOTE_ATTEMPTS = 5
+_PROMOTE_DELAY_SECONDS = 0.3
 
 # --- modos / estados -----------------------------------------------------
 MODE_DIAGNOSTIC_REFERENCE = "DIAGNOSTIC_REFERENCE"
@@ -127,6 +148,7 @@ class WorkbookSnapshot:
     vba_payload_sha256: str | None
     structural_fingerprint_id: str
     file_sha256: str | None = None
+    vba_project: VbaProject | None = None
 
     def formula_count(self) -> int:
         return len(self.formula_map)
@@ -170,16 +192,17 @@ def snapshot_from_path(path: str | Path, *, with_values: bool = True) -> Workboo
                         values[(ws.title, cell.coordinate)] = cell.value
         wb_v.close()
 
-    present, payload_sha = vba_payload_info(p)
+    vba_project = read_vba_project(p)
     return WorkbookSnapshot(
         path=str(p),
         sheet_names=sheet_names,
         formula_map=formula_map,
         values=values,
-        vba_present=present,
-        vba_payload_sha256=payload_sha,
+        vba_present=vba_project.present,
+        vba_payload_sha256=vba_project.payload_sha256,
         structural_fingerprint_id=fingerprint,
         file_sha256=compute_sha256(p),
+        vba_project=vba_project,
     )
 
 
@@ -354,37 +377,10 @@ def _norm_formula(text: str) -> str:
     return text.strip().removeprefix("=").replace(" ", "").casefold()
 
 
-@dataclass(frozen=True)
-class VbaIntegrityReport:
-    present_before: bool
-    present_after: bool
-    payload_sha256_before: str | None
-    payload_sha256_after: str | None
-
-    @property
-    def ok(self) -> bool:
-        if not (self.present_before and self.present_after):
-            return self.present_before == self.present_after
-        if self.payload_sha256_before and self.payload_sha256_after:
-            return self.payload_sha256_before == self.payload_sha256_after
-        return True
-
-    @property
-    def payload_stable(self) -> bool | None:
-        if self.payload_sha256_before and self.payload_sha256_after:
-            return self.payload_sha256_before == self.payload_sha256_after
-        return None
-
-
-def compare_vba_integrity(
-    before: WorkbookSnapshot, after: WorkbookSnapshot
-) -> VbaIntegrityReport:
-    return VbaIntegrityReport(
-        present_before=before.vba_present,
-        present_after=after.vba_present,
-        payload_sha256_before=before.vba_payload_sha256,
-        payload_sha256_after=after.vba_payload_sha256,
-    )
+# La integridad VBA se compara **semánticamente** (código por módulo), no por el
+# SHA256 bruto de vbaProject.bin: ``generate()`` llama a
+# :func:`remasep.services.vba_integrity.compare_vba_projects` sobre
+# ``WorkbookSnapshot.vba_project``.
 
 
 # ---------------------------------------------------------------------------
@@ -625,6 +621,91 @@ def plan_output_paths(
 
 
 # ---------------------------------------------------------------------------
+# Workspace temporal, único por corrida (§11 — patch final)
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class RunWorkspace:
+    """Directorio temporal **propio** de una única generación.
+
+    ``outputs/.remasep-tmp/<run_id>/working.xlsm`` — nunca un temporal compartido,
+    nunca sobrescribe otro temporal, nunca se borra nada fuera de este árbol.
+    """
+
+    run_id: str
+    tmp_base: Path
+    root: Path
+    working_path: Path
+
+
+def new_run_id() -> str:
+    return f"{datetime.now(UTC):%Y%m%dT%H%M%S}-{uuid.uuid4().hex[:12]}"
+
+
+def create_run_workspace(
+    output_path: Path, *, tmp_base: Path | None = None, run_id: str | None = None
+) -> RunWorkspace:
+    """Crea un workspace nuevo y exclusivo. ``mkdir(exist_ok=False)`` garantiza
+    que dos corridas nunca comparten ruta ni pisan un temporal existente."""
+    base = Path(tmp_base) if tmp_base is not None else (output_path.parent / _TMP_DIRNAME)
+    rid = run_id or new_run_id()
+    root = base / rid
+    root.mkdir(parents=True, exist_ok=False)
+    return RunWorkspace(
+        run_id=rid,
+        tmp_base=base,
+        root=root,
+        working_path=root / f"working{output_path.suffix or '.xlsm'}",
+    )
+
+
+def cleanup_run_workspace(workspace: RunWorkspace) -> tuple[str, str | None]:
+    """Cleanup best-effort del workspace **propio**.
+
+    Devuelve ``(status, diagnostic_path)``:
+
+    - ``CLEANUP_OK`` — se borró.
+    - ``CLEANUP_PENDING`` — Windows mantiene un handle (``PermissionError`` /
+      ``WinError 32``): **no** se fuerza, **no** ``taskkill``, **no** loop; se
+      devuelve la ruta sólo para diagnóstico local.
+    - ``CLEANUP_REFUSED_OUT_OF_WORKSPACE`` — la ruta no está bajo ``tmp_base``
+      (nunca debería ocurrir; salvaguarda para no borrar rutas ajenas).
+    """
+    if not _is_within(workspace.root, workspace.tmp_base):
+        return CLEANUP_REFUSED, str(workspace.root)
+    try:
+        if workspace.root.exists():
+            shutil.rmtree(workspace.root)
+        # quitar el .remasep-tmp/ si quedó vacío (best-effort, no fatal)
+        try:
+            workspace.tmp_base.rmdir()
+        except OSError:
+            pass
+        return CLEANUP_OK, None
+    except (PermissionError, OSError):
+        return CLEANUP_PENDING, str(workspace.root)
+
+
+def _atomic_promote(working_path: Path, final_path: Path) -> None:
+    """``os.replace`` (rename atómico) con reintento **acotado** ante un handle
+    residual de Excel en Windows. Sin loop infinito, sin borrado forzado."""
+    last: OSError | None = None
+    for attempt in range(_PROMOTE_ATTEMPTS):
+        try:
+            working_path.replace(final_path)
+            return
+        except (PermissionError, OSError) as exc:
+            last = exc
+            if attempt + 1 < _PROMOTE_ATTEMPTS:
+                _sleep(_PROMOTE_DELAY_SECONDS)
+    raise ExcelWriterError(
+        f"no se pudo promover la copia de trabajo a {final_path.name} "
+        f"tras {_PROMOTE_ATTEMPTS} intentos: {last.__class__.__name__}"
+    )
+
+
+# ---------------------------------------------------------------------------
 # Orquestador (§6 / §11 / §12 / §17 / §18)
 # ---------------------------------------------------------------------------
 
@@ -642,6 +723,7 @@ class GenerationRequest:
     manifest_instruction_ids: tuple[str, ...]
     forbidden_dirs: tuple[Path, ...] = ()
     historical_reference_cache_status: str = "KNOWN_STALE_FOR_142_WRITE_READY_VALUES"
+    tmp_base: Path | None = None  # por defecto: <output_path>/../.remasep-tmp
 
 
 @dataclass
@@ -657,13 +739,16 @@ class GenerationResult:
     preflight: PreflightReport | None = None
     template_compatibility: TemplateCompatibility | None = None
     formula_integrity: FormulaIntegrityReport | None = None
-    vba_integrity: VbaIntegrityReport | None = None
+    vba_integrity: VbaComparison | None = None
     target_verification: TargetVerification | None = None
     control_result: ControlResult | None = None
     template_sha256_before: str | None = None
     template_sha256_after: str | None = None
     template_unchanged: bool | None = None
     historical_reference_cache_status: str = ""
+    run_id: str | None = None
+    cleanup_status: str = ""
+    workspace_path: str | None = None  # sólo cuando cleanup queda pendiente
     warnings: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
 
@@ -738,12 +823,28 @@ def generate(
         ]
         return result
 
-    working_path = request.output_path.with_name(
-        request.output_path.stem + ".__working__" + request.output_path.suffix
-    )
-    result.working_path = str(working_path)
-    working_path.parent.mkdir(parents=True, exist_ok=True)
-    _safe_unlink(working_path)
+    # --- workspace temporal propio de ESTA corrida ------------------
+    request.output_path.parent.mkdir(parents=True, exist_ok=True)
+    workspace = create_run_workspace(request.output_path, tmp_base=request.tmp_base)
+    result.run_id = workspace.run_id
+    working_path = workspace.working_path
+
+    def _finish_failure(status: str, errors: list[str]) -> GenerationResult:
+        cleanup_status, diag = cleanup_run_workspace(workspace)
+        result.status = status
+        result.errors = errors
+        result.cleanup_status = cleanup_status
+        if cleanup_status == CLEANUP_PENDING:
+            result.workspace_path = diag
+            result.warnings.append(
+                f"CLEANUP_PENDING: un handle de Windows retiene {diag}; no se fuerza "
+                "el borrado. Se puede eliminar manualmente más tarde."
+            )
+        result.template_sha256_after = compute_sha256(request.template_path)
+        result.template_unchanged = (
+            result.template_sha256_after == result.template_sha256_before
+        )
+        return result
 
     # --- copy-first + escritura --------------------------------------
     try:
@@ -756,31 +857,20 @@ def generate(
             writer.save()
         after = inspect(working_path)
     except ExcelWriterError as exc:
-        _safe_unlink(working_path)
-        result.status = (
+        status = (
             STATUS_FAILED_INTEGRITY_CHECK
             if TARGET_FORMULA_CONFLICT in str(exc)
             else STATUS_GENERATION_FAILED
         )
-        result.errors = [str(exc)]
-        result.template_sha256_after = compute_sha256(request.template_path)
-        result.template_unchanged = (
-            result.template_sha256_after == result.template_sha256_before
-        )
-        return result
+        return _finish_failure(status, [str(exc)])
     except Exception as exc:  # noqa: BLE001 - se resume a un motivo legible
-        _safe_unlink(working_path)
-        result.status = STATUS_GENERATION_FAILED
-        result.errors = [f"{exc.__class__.__name__}: {exc}"]
-        result.template_sha256_after = compute_sha256(request.template_path)
-        result.template_unchanged = (
-            result.template_sha256_after == result.template_sha256_before
+        return _finish_failure(
+            STATUS_GENERATION_FAILED, [f"{exc.__class__.__name__}: {exc}"]
         )
-        return result
 
     # --- verificación posterior ------------------------------------
     formula_integrity = compare_formula_integrity(before, after)
-    vba_integrity = compare_vba_integrity(before, after)
+    vba_integrity = compare_vba_projects(before.vba_project, after.vba_project)
     target_verification = verify_targets(after, pending_writes)
     control_result = parse_control(after, control_map)
 
@@ -790,6 +880,7 @@ def generate(
     result.control_result = control_result
     result.control_status = control_result.status
     result.written_cells = target_verification.written_ok
+    result.warnings.extend(vba_integrity.warnings)
 
     fingerprint_still_ok = after.structural_fingerprint_id == request.expected_fingerprint_id
     sheets_ok = set(before.sheet_names).issubset(set(after.sheet_names))
@@ -806,36 +897,42 @@ def generate(
     )
 
     if not integrity_ok:
+        errors: list[str] = []
         if not formula_integrity.ok:
-            result.errors.append("GENERATION_FAILED_INTEGRITY_CHECK: fórmulas alteradas")
+            errors.append("GENERATION_FAILED_INTEGRITY_CHECK: fórmulas alteradas")
         if not vba_integrity.ok:
-            result.errors.append("GENERATION_FAILED_INTEGRITY_CHECK: VBA alterado/ausente")
+            errors.append(
+                "GENERATION_FAILED_INTEGRITY_CHECK: "
+                + "; ".join(vba_integrity.fail_reasons)
+            )
         if not target_verification.ok:
-            result.errors.append(
+            errors.append(
                 "GENERATION_FAILED_INTEGRITY_CHECK: "
                 f"{len(target_verification.failures)} celda(s) destino no verificadas"
             )
         if not fingerprint_still_ok:
-            result.errors.append("GENERATION_FAILED_INTEGRITY_CHECK: fingerprint estructural cambió")
+            errors.append("GENERATION_FAILED_INTEGRITY_CHECK: fingerprint estructural cambió")
         if not sheets_ok:
-            result.errors.append("GENERATION_FAILED_INTEGRITY_CHECK: faltan hojas")
-        _safe_unlink(working_path)
-        result.status = STATUS_FAILED_INTEGRITY_CHECK
-        result.template_sha256_after = compute_sha256(request.template_path)
-        result.template_unchanged = (
-            result.template_sha256_after == result.template_sha256_before
-        )
-        return result
+            errors.append("GENERATION_FAILED_INTEGRITY_CHECK: faltan hojas")
+        return _finish_failure(STATUS_FAILED_INTEGRITY_CHECK, errors)
 
     # --- promoción atómica a salida final --------------------------
     if request.output_path.exists():
-        _safe_unlink(working_path)
-        result.status = STATUS_OUTPUT_EXISTS
-        result.errors = ["OUTPUT_ALREADY_EXISTS"]
-        return result
-    working_path.replace(request.output_path)
+        return _finish_failure(STATUS_OUTPUT_EXISTS, ["OUTPUT_ALREADY_EXISTS"])
+    try:
+        _atomic_promote(working_path, request.output_path)
+    except ExcelWriterError as exc:
+        return _finish_failure(STATUS_GENERATION_FAILED, [str(exc)])
+
     result.output_path = str(request.output_path)
-    result.working_path = None
+    cleanup_status, diag = cleanup_run_workspace(workspace)
+    result.cleanup_status = cleanup_status
+    if cleanup_status == CLEANUP_PENDING:
+        result.workspace_path = diag
+        result.warnings.append(
+            f"CLEANUP_PENDING: no se pudo borrar el workspace temporal {diag} "
+            "(la salida final sí se generó). Se puede eliminar manualmente."
+        )
 
     result.template_sha256_after = compute_sha256(request.template_path)
     result.template_unchanged = result.template_sha256_after == result.template_sha256_before
@@ -876,12 +973,6 @@ def _assert_targets_writable(
             raise ExcelWriterError(
                 f"celda destino no escribible (protegida): {pw.target_sheet}!{pw.target_cell}"
             )
-
-
-def _safe_unlink(path: Path) -> None:
-    with_suffix = path.suffix.lower() in {".xlsm", ".xlsx", ".xltm"}
-    if path.exists() and with_suffix and "__working__" in path.name:
-        path.unlink()
 
 
 # ---------------------------------------------------------------------------

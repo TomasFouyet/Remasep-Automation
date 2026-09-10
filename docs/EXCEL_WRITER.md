@@ -25,6 +25,10 @@ termina con código 3. La generación real sólo ocurre en Windows con
 Ningún módulo importa `win32com` a nivel de módulo: `import`ar el writer, el
 adaptador COM o la CLI funciona en cualquier sistema operativo.
 
+Dependencia añadida en 3.7B: **`olefile`** (`>=0.46`, pura Python, ~114 KB) para
+la comparación semántica de VBA. Si falta, la verificación es **fail-closed**
+(`VBA_SEMANTIC_CHECK_UNAVAILABLE` → no se genera la salida).
+
 ## Arquitectura por capas
 
 | capa | módulo | plataforma |
@@ -74,17 +78,35 @@ Se preserva el proyecto VBA (`.xlsm`, `keep_vba`). **No** se ejecuta ninguna
 macro, **no** se llama `Application.Run`, **no** se tocan Trusted Locations,
 registro, macro security, Trust Center ni Protected View.
 
-## Copy-first + salida atómica
+## Copy-first + workspace por corrida + salida atómica
 
 ```
-template ──copy2──▶ output.__working__.xlsm ──write/recalc/save──▶ (verificación) ──replace──▶ output.xlsm
+template
+  └─copy2─▶ outputs/.remasep-tmp/<run_id>/working.xlsm   ← workspace propio y ÚNICO
+              └─ write / recalc / save (Excel COM)
+              └─ verificación (openpyxl, estático)
+                   └─ os.replace ──▶ outputs/REMASEP_2026_07_DRAFT.xlsm   (atómico)
+                        └─ rmtree(workspace)  (best-effort)
 ```
 
-Nunca se abre `template_path` en modo escritura. Se verifica el SHA256 de la
-plantilla antes y después: debe quedar idéntico (`template_unchanged`). Si algo
-falla se borra la copia de trabajo, la plantilla queda intacta y **no** se
-produce salida final parcial. La promoción a `output.xlsm` es un `Path.replace`
-(rename atómico) y sólo ocurre si toda la verificación pasó.
+Nunca se abre `template_path` en modo escritura ni se usa un temporal
+compartido: cada generación crea `outputs/.remasep-tmp/<run_id>/`
+(`run_id` = timestamp + `uuid4`, `mkdir(exist_ok=False)`) — dos corridas **jamás**
+comparten ruta y una corrida nunca pisa ni borra el temporal de otra. La
+promoción a la salida final es `Path.replace` (= `os.replace`, rename atómico)
+con **reintento acotado** (`_PROMOTE_ATTEMPTS = 5`, sin loop infinito) por si
+Windows conserva un handle momentáneo tras cerrar Excel; sólo ocurre si toda la
+verificación pasó.
+
+**Cleanup conservador** (`cleanup_run_workspace`): borra **sólo** su propio
+`<run_id>/` (salvaguarda `_is_within(root, .remasep-tmp)`; si no, `CLEANUP_REFUSED`).
+Si Windows retiene un handle (`WinError 32` / `PermissionError`) **no** se fuerza,
+**no** hay `taskkill`, **no** hay loop: se devuelve `cleanup_status =
+CLEANUP_PENDING` + `workspace_path` (sólo para diagnóstico local) + un warning;
+la generación no se marca fallida por eso. No se muestra traceback al usuario.
+
+El SHA256 de la plantilla se verifica antes y después (`template_unchanged`). Si
+algo falla, la plantilla queda intacta y **no** hay salida final parcial.
 
 ## Preflight (antes de tocar nada)
 
@@ -140,14 +162,69 @@ compara contra el snapshot previo:
 
 - **fórmulas**: `compare_formula_integrity` — 0 `FORMULA_EXPRESSION_CHANGE`,
   0 añadidas, 0 eliminadas; cualquier cambio → `GENERATION_FAILED_INTEGRITY_CHECK`.
-- **VBA**: presente antes y después; si se puede, hash estable del payload
-  `xl/vbaProject.bin` comparado.
+- **VBA**: comparación **semántica** por módulo (ver abajo).
 - **celdas destino**: cada `PendingWrite` está en su celda con su valor; ninguna
   se volvió fórmula; ninguna falta.
 - **fingerprint estructural**: sigue siendo compatible.
 - **hojas**: no falta ninguna.
 
 `writer_integrity_status` ∈ `WRITER_INTEGRITY_PASS` / `WRITER_INTEGRITY_FAIL`.
+
+### Integridad semántica de VBA (`remasep.services.vba_integrity`)
+
+Comparar el **SHA256 bruto** de `xl/vbaProject.bin` es un criterio erróneo: un
+`Save` legítimo de Excel **regenera** los streams de caché compilada
+(`__SRP_0..n`, `_VBA_PROJECT`, la P-code de cada módulo) sin que cambie una línea
+de macro. En el caso real reportado eso producía un falso
+`GENERATION_FAILED_INTEGRITY_CHECK: VBA alterado/ausente` aun con `1122/1122`
+celdas verificadas y fórmulas intactas.
+
+En su lugar se extrae, **sólo lectura**, el código fuente descomprimido por
+módulo:
+
+- `olefile` (dependencia lean, pura Python, ~114 KB) abre el OLE Compound File;
+- se descomprime el *CompressedContainer* de cada stream `VBA/<módulo>` según
+  **MS-OVBA §2.4.1** (`decompress_vba_container`) — sin ejecutar nada, sin COM,
+  sin VBIDE, sin habilitar "Trust access to the VBA project object model", sin
+  tocar el Trust Center ni la protección del proyecto;
+- se separa el bloque `Attribute VB_*` del **cuerpo de código** y se hashea cada
+  parte (`code_sha256`, `attributes_sha256`).
+
+Campos: `vba_present_before/after`, `vba_binary_payload_sha_before/after`,
+`vba_binary_payload_stable`, `semantic_available`, `module_names_before/after`,
+`added_modules`, `removed_modules`, `code_changed_modules`,
+`attributes_changed_modules`.
+
+`status` ∈ **`VBA_INTEGRITY_PASS`** / **`VBA_INTEGRITY_FAIL`** (sólo dos).
+
+**FALLA** (`VBA_INTEGRITY_FAIL`) si: el proyecto VBA existía y **desaparece** (o
+aparece); **cambia el conjunto de módulos**; **cambia el código** de un módulo
+(`code_sha256`); **o** el VBA existe pero **no se pudo verificar el código**
+(sin `olefile` / parseo fallido) → `reason = VBA_SEMANTIC_CHECK_UNAVAILABLE`
+(**fail-closed**).
+
+Quedan como **diagnóstico/warning** (no fallo) **únicamente cuando la
+comparación semántica sí se ejecutó y demostró equivalencia** (`semantic_available`,
+módulos iguales, `code_changed_modules == ()`): el cambio sólo del binario
+`vbaProject.bin` (`VBA_BINARY_PAYLOAD_CHANGED_SEMANTIC_EQUIVALENT`) y el
+reordenamiento de atributos/controles (`VBA_MODULE_ATTRIBUTES_CHANGED` — p.ej.
+las líneas `Attribute VB_Control` de los botones ActiveX de una hoja).
+
+**Fail-closed en `VBA_SEMANTIC_CHECK_UNAVAILABLE`**: si el proyecto VBA existe
+pero `olefile` no está instalado o el `vbaProject.bin` no se puede parsear, el
+writer **falla** y **no promueve** el workbook al output final. **Nunca** se
+asume equivalencia sólo porque `vbaProject.bin` siga presente. Se conservan
+presencia + hashes binarios como evidencia en un mensaje legible
+(`GENERATION_FAILED_INTEGRITY_CHECK: VBA_SEMANTIC_CHECK_UNAVAILABLE: …`).
+
+Reproducción (Linux, sin Excel): `read_vba_project()` sobre
+`data/local/REMASEP_V1.4 Julio 2026.xlsm` extrae **13 módulos**
+(`ThisWorkbook`, `Módulo1` con `Sub PROTEGER()`, `Hoja1..Hoja10`, `Hoja21`).
+Comparado contra `data/local/2026-7 REMASEP_V1.4.xlsm` (otro `Save` real):
+`vbaProject.bin` difiere en binario (40 960 vs 45 056 bytes; `__SRP_*` pasa de
+4 a 10 streams) pero **`code_changed_modules == ()`** — sólo
+`attributes_changed_modules == ('Hoja21',)` por el reordenamiento de tres
+`Attribute VB_Control`. Estado → `VBA_INTEGRITY_PASS` + warnings.
 
 ## CONTROL (§21/§22)
 

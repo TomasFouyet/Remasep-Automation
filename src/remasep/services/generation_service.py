@@ -123,6 +123,7 @@ class GenerationService:
         zero_write_policy: str,
         output_path: str | Path | None = None,
         expected_fingerprint_id: str | None = None,
+        tmp_base: str | Path | None = None,
         open_writer: Callable[[Path], AbstractContextManager[WorkbookWriter]] | None = None,
         inspect: Callable[[Path], WorkbookSnapshot] = snapshot_from_path,
         write_artifacts: bool = True,
@@ -205,6 +206,7 @@ class GenerationService:
                     "KNOWN_STALE_FOR_142_WRITE_READY_VALUES",
                 )
             ),
+            tmp_base=Path(tmp_base) if tmp_base is not None else None,
         )
 
         from remasep.services.excel_writer import generate as _generate
@@ -311,10 +313,8 @@ class GenerationService:
             "formula_count_before": fi.formula_count_before if fi else None,
             "formula_count_after": fi.formula_count_after if fi else None,
             "formula_integrity_ok": fi.ok if fi else None,
-            "vba_present_before": result.vba_integrity.present_before if result.vba_integrity else None,
-            "vba_present_after": result.vba_integrity.present_after if result.vba_integrity else None,
-            "vba_payload_stable": (
-                result.vba_integrity.payload_stable if result.vba_integrity else None
+            "vba_integrity": (
+                result.vba_integrity.as_dict() if result.vba_integrity else None
             ),
         }
         (self._artifacts_dir / "template_verification.json").write_text(
@@ -339,6 +339,12 @@ class GenerationService:
             ),
             "historical_reference_cache_status": result.historical_reference_cache_status,
             "template_unchanged": result.template_unchanged,
+            "run_id": result.run_id,
+            "cleanup_status": result.cleanup_status,
+            "workspace_path_pending": result.workspace_path,
+            "vba_integrity_status": (
+                result.vba_integrity.status if result.vba_integrity else None
+            ),
             "pending_write_count": len(pending_writes),
             "preflight_ok": result.preflight.ok if result.preflight else None,
             "preflight_errors": result.preflight.errors if result.preflight else [],

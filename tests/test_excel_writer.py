@@ -96,8 +96,10 @@ def test_happy_path_writes_all_targets_and_promotes_atomically(tmp_path):
     assert result.written_cells == 3
     assert result.output_path == str(request.output_path)
     assert request.output_path.exists()
-    working = request.output_path.with_name("REMASEP_2026_07_DRAFT.__working__.xlsm")
-    assert not working.exists()
+    assert result.run_id  # workspace único por corrida
+    assert result.cleanup_status == w.CLEANUP_OK
+    assert result.workspace_path is None
+    assert not (tmp_path / ".remasep-tmp").exists()  # workspace borrado
     assert result.template_unchanged is True
     assert result.submission_label == w.SUBMISSION_LABEL
 
@@ -223,8 +225,8 @@ def test_target_with_formula_aborts_and_keeps_template(tmp_path):
     assert w.TARGET_FORMULA_CONFLICT in result.errors[0]
     assert not request.output_path.exists()
     assert result.template_unchanged is True
-    working = request.output_path.with_name("REMASEP_2026_07_DRAFT.__working__.xlsm")
-    assert not working.exists()
+    assert result.cleanup_status == w.CLEANUP_OK
+    assert not (tmp_path / ".remasep-tmp").exists()
 
 
 def test_target_not_writable_aborts(tmp_path):
@@ -262,6 +264,54 @@ def test_vba_lost_fails_integrity(tmp_path):
     result, _, _ = _generate(tmp_path, pending, model)
     assert result.status == w.STATUS_FAILED_INTEGRITY_CHECK
     assert result.vba_integrity.ok is False
+    assert any("VBA_LOST" in e for e in result.errors)
+
+
+def test_vba_code_change_fails_integrity(tmp_path):
+    targets = [("REMASEP_OD", "B10", 1)]
+    pending = _pw(targets)
+
+    def mutate(m: FakeWorkbookModel) -> None:
+        m.vba_modules = {"Módulo1": 'Sub PROTEGER()\n  Shell "x"\nEnd Sub', "ThisWorkbook": ""}
+
+    model = _model(targets, mutate_after_save=mutate)
+    result, _, _ = _generate(tmp_path, pending, model)
+    assert result.status == w.STATUS_FAILED_INTEGRITY_CHECK
+    assert any("VBA_MODULE_SOURCE_CHANGED" in e for e in result.errors)
+
+
+def test_vba_binary_payload_change_only_is_pass_with_warning(tmp_path):
+    """El caso real reportado: Save de Excel reescribe vbaProject.bin sin tocar
+    el código -> WRITER_INTEGRITY_PASS + warning, no FAIL."""
+    targets = [("REMASEP_OD", "B10", 1)]
+    pending = _pw(targets)
+
+    def mutate(m: FakeWorkbookModel) -> None:
+        m.vba_payload_sha256 = "post-save-binary-sha"  # sólo el binario
+
+    model = _model(targets, mutate_after_save=mutate)
+    result, _, _ = _generate(tmp_path, pending, model)
+    assert result.status == w.STATUS_GENERATED_DIAGNOSTIC
+    assert result.writer_integrity_status == w.WRITER_INTEGRITY_PASS
+    assert result.vba_integrity.payload_stable is False
+    assert any("SEMANTIC_EQUIVALENT" in x for x in result.warnings)
+
+
+def test_vba_semantic_unavailable_is_fail_closed_and_blocks_output(tmp_path):
+    """Si el VBA existe pero no se puede verificar el código -> FAIL, no se
+    promueve la salida, se limpia el workspace, plantilla intacta."""
+    targets = [("REMASEP_OD", "B10", 1)]
+    pending = _pw(targets)
+    model = _model(targets, vba_semantic_available=False)
+    result, request, _ = _generate(tmp_path, pending, model)
+    assert result.status == w.STATUS_FAILED_INTEGRITY_CHECK
+    assert result.writer_integrity_status == w.WRITER_INTEGRITY_FAIL
+    assert result.vba_integrity.status == "VBA_INTEGRITY_FAIL"
+    assert result.vba_integrity.ok is False
+    assert any("VBA_SEMANTIC_CHECK_UNAVAILABLE" in e for e in result.errors)
+    assert not request.output_path.exists()
+    assert result.cleanup_status == w.CLEANUP_OK
+    assert result.template_unchanged is True
 
 
 def test_vba_present_before_and_after_on_success(tmp_path):
@@ -272,7 +322,7 @@ def test_vba_present_before_and_after_on_success(tmp_path):
     assert result.vba_integrity.present_after is True
 
 
-def test_writer_failure_cleans_working_copy_and_keeps_template(tmp_path):
+def test_writer_failure_cleans_workspace_and_keeps_template(tmp_path):
     targets = [("REMASEP_OD", "B10", 1)]
     pending = _pw(targets)
     harness = FakeWriterHarness(_model(targets), fail_during_write=True)
@@ -281,8 +331,8 @@ def test_writer_failure_cleans_working_copy_and_keeps_template(tmp_path):
                         control_map=_CONTROL_MAP, inspect=harness.inspect)
     assert result.status == w.STATUS_GENERATION_FAILED
     assert not request.output_path.exists()
-    working = request.output_path.with_name("REMASEP_2026_07_DRAFT.__working__.xlsm")
-    assert not working.exists()
+    assert result.cleanup_status == w.CLEANUP_OK
+    assert not (tmp_path / ".remasep-tmp").exists()
     assert result.template_unchanged is True
 
 
@@ -372,3 +422,150 @@ def test_invalid_mode_raises(tmp_path):
     with pytest.raises(w.ExcelWriterError):
         w.generate(request, pending, open_writer=FakeWriterHarness(_model([])).open_writer,
                    control_map=_CONTROL_MAP)
+
+
+# ---------------------------------------------------------------------------
+# Workspace temporal por corrida (§11 — patch final)
+# ---------------------------------------------------------------------------
+
+
+def test_two_runs_do_not_share_a_temp_path(tmp_path):
+    out = tmp_path / "outputs"
+    ws1 = w.create_run_workspace(out / "R1.xlsm")
+    ws2 = w.create_run_workspace(out / "R2.xlsm")
+    assert ws1.run_id != ws2.run_id
+    assert ws1.working_path != ws2.working_path
+    assert ws1.root.is_dir() and ws2.root.is_dir()
+    assert w._is_within(ws1.root, ws1.tmp_base)
+
+
+def test_create_run_workspace_never_reuses_an_existing_dir(tmp_path):
+    out = tmp_path / "outputs"
+    ws = w.create_run_workspace(out / "R.xlsm", run_id="fixed")
+    assert ws.root.is_dir()
+    with pytest.raises(FileExistsError):  # exist_ok=False
+        w.create_run_workspace(out / "R.xlsm", run_id="fixed")
+
+
+def test_stale_temp_from_another_run_does_not_block_generation(tmp_path):
+    targets = [("REMASEP_OD", "B10", 3)]
+    pending = _pw(targets)
+    out = tmp_path / "REMASEP_2026_07_DRAFT.xlsm"
+    # simula un temporal huérfano de una corrida previa que crasheó, con un
+    # archivo "bloqueado" adentro
+    stale = tmp_path / ".remasep-tmp" / "20200101T000000-deadbeefcafe"
+    stale.mkdir(parents=True)
+    (stale / "working.xlsm").write_bytes(b"stale, locked")
+    result, request, _ = _generate(tmp_path, pending, _model(targets), output=out)
+    assert result.status == w.STATUS_GENERATED_DIAGNOSTIC
+    assert request.output_path.exists()
+    assert stale.exists()  # NO se toca el temporal ajeno
+
+
+def test_cleanup_pending_when_workspace_locked_does_not_hide_original_error(
+    tmp_path, monkeypatch
+):
+    targets = [("REMASEP_OD", "B10", 1)]
+    pending = _pw(targets)
+    model = _model(targets)
+    model.formula_map[("REMASEP_OD", "B10")] = "=1+1"  # -> TARGET_FORMULA_CONFLICT
+
+    def _boom(_path):
+        raise PermissionError("WinError 32: archivo en uso")
+
+    monkeypatch.setattr(w.shutil, "rmtree", _boom)
+    result, _, _ = _generate(tmp_path, pending, model)
+    assert result.status == w.STATUS_FAILED_INTEGRITY_CHECK
+    assert w.TARGET_FORMULA_CONFLICT in result.errors[0]  # error original intacto
+    assert result.cleanup_status == w.CLEANUP_PENDING
+    assert result.workspace_path is not None
+    assert any("CLEANUP_PENDING" in x for x in result.warnings)
+
+
+def test_cleanup_refuses_to_delete_outside_its_workspace(tmp_path):
+    outside = tmp_path / "not-a-workspace"
+    outside.mkdir()
+    bogus = w.RunWorkspace(
+        run_id="x", tmp_base=tmp_path / ".remasep-tmp", root=outside,
+        working_path=outside / "working.xlsm",
+    )
+    status, _diag = w.cleanup_run_workspace(bogus)
+    assert status == w.CLEANUP_REFUSED
+    assert outside.exists()  # no se borró nada ajeno
+
+
+def test_atomic_promote_retries_then_raises(monkeypatch):
+    calls = {"n": 0}
+
+    class _P:
+        def replace(self, _dst):
+            calls["n"] += 1
+            raise PermissionError("bloqueado")
+        name = "x.xlsm"
+
+    monkeypatch.setattr(w, "_sleep", lambda _s: None)
+    with pytest.raises(w.ExcelWriterError):
+        w._atomic_promote(_P(), Path("x.xlsm"))
+    assert calls["n"] == w._PROMOTE_ATTEMPTS  # acotado, sin loop infinito
+
+
+def test_atomic_promote_succeeds_after_transient_lock(tmp_path, monkeypatch):
+    src = tmp_path / "src.xlsm"
+    src.write_bytes(b"data")
+    dst = tmp_path / "dst.xlsm"
+    real_replace = Path.replace
+    state = {"fails": 2}
+
+    def flaky(self, target):
+        if state["fails"] > 0:
+            state["fails"] -= 1
+            raise PermissionError("transient")
+        return real_replace(self, target)
+
+    monkeypatch.setattr(w, "_sleep", lambda _s: None)
+    monkeypatch.setattr(Path, "replace", flaky)
+    w._atomic_promote(src, dst)
+    assert dst.read_bytes() == b"data"
+
+
+def test_no_process_killing_in_codebase():
+    """El writer nunca mata procesos ni fuerza borrados globales: no hay
+    ``subprocess`` / ``os.system`` / ``os.kill`` / ``psutil`` ni comandos de
+    kill como literales de string. (Las MENCIONES en docstrings de que NO se
+    hace esto están permitidas y se ignoran.)"""
+    import ast
+
+    root = Path(__file__).resolve().parent.parent
+    banned_strings = ("taskkill", "stop-process", "pkill", "killall", "/f /im")
+    banned_calls = {("os", "system"), ("os", "kill"), ("os", "popen")}
+    hits: list[str] = []
+    for py in list((root / "src").rglob("*.py")) + list((root / "scripts").rglob("*.py")):
+        tree = ast.parse(py.read_text(encoding="utf-8"), filename=str(py))
+        # ids de constantes que son docstrings / strings sueltos (inertes)
+        inert = {
+            id(n.value)
+            for n in ast.walk(tree)
+            if isinstance(n, ast.Expr) and isinstance(n.value, ast.Constant)
+        }
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    if alias.name.split(".")[0] in {"subprocess", "psutil"}:
+                        hits.append(f"{py.name}: import {alias.name}")
+            elif isinstance(node, ast.ImportFrom) and (node.module or "").split(".")[0] in {
+                "subprocess",
+                "psutil",
+            }:
+                hits.append(f"{py.name}: from {node.module}")
+            elif (
+                isinstance(node, ast.Constant)
+                and isinstance(node.value, str)
+                and id(node) not in inert
+            ):
+                low = node.value.lower()
+                hits += [f"{py.name}: string {b!r}" for b in banned_strings if b in low]
+            elif isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+                value = node.func.value
+                if isinstance(value, ast.Name) and (value.id, node.func.attr) in banned_calls:
+                    hits.append(f"{py.name}: {value.id}.{node.func.attr}()")
+    assert not hits, hits

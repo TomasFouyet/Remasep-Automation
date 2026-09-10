@@ -1,18 +1,31 @@
 """``FakeWorkbookWriter`` — doble de test del contrato :class:`WorkbookWriter`.
 
 Modela un workbook en memoria (hojas, fórmulas, valores, celdas escribibles,
-merges incompatibles, presencia de VBA). **No abre Excel ni escribe .xlsm.**
-Permite probar todo el núcleo de :mod:`remasep.services.excel_writer` sin
-Windows.
+merges incompatibles, proyecto VBA por módulos). **No abre Excel ni escribe
+.xlsm.** Permite probar todo el núcleo de :mod:`remasep.services.excel_writer`
+sin Windows.
 """
 
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 
 from remasep.services.excel_writer import WorkbookSnapshot
+from remasep.services.vba_integrity import (
+    EXTRACTION_ABSENT,
+    EXTRACTION_EXTRACTED,
+    VbaModule,
+    VbaProject,
+)
+
+_DEFAULT_VBA = {"Módulo1": "Sub PROTEGER()\nEnd Sub", "ThisWorkbook": ""}
+
+
+def _sha(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 @dataclass
@@ -24,6 +37,10 @@ class FakeWorkbookModel:
     incompatible_merges: set[tuple[str, str]] = field(default_factory=set)
     vba_present: bool = True
     vba_payload_sha256: str | None = "fake-vba-sha"
+    # código VBA por módulo (name -> cuerpo de código); None -> conjunto por defecto.
+    vba_modules: dict[str, str] | None = None
+    # si es False, el proyecto VBA se reporta como no extraíble semánticamente.
+    vba_semantic_available: bool = True
     structural_fingerprint_id: str = "stf:dc624775927d4d4d"
     # comportamiento simulado del recálculo: (sheet, cell) -> callable(values) -> value
     recalculators: dict[tuple[str, str], object] = field(default_factory=dict)
@@ -40,9 +57,35 @@ class FakeWorkbookModel:
             incompatible_merges=set(self.incompatible_merges),
             vba_present=self.vba_present,
             vba_payload_sha256=self.vba_payload_sha256,
+            vba_modules=None if self.vba_modules is None else dict(self.vba_modules),
+            vba_semantic_available=self.vba_semantic_available,
             structural_fingerprint_id=self.structural_fingerprint_id,
             recalculators=dict(self.recalculators),
             mutate_after_save=self.mutate_after_save,
+        )
+
+    def vba_project(self) -> VbaProject:
+        if not self.vba_present:
+            return VbaProject(
+                present=False, payload_sha256=None, modules=(),
+                extraction_status=EXTRACTION_ABSENT,
+            )
+        if not self.vba_semantic_available:
+            return VbaProject(
+                present=True, payload_sha256=self.vba_payload_sha256, modules=(),
+                extraction_status="UNAVAILABLE_PARSE_ERROR",
+                note="fake: extracción semántica deshabilitada",
+            )
+        src = _DEFAULT_VBA if self.vba_modules is None else self.vba_modules
+        modules = tuple(
+            VbaModule(name=name, code_sha256=_sha(code), attributes_sha256=_sha(""))
+            for name, code in sorted(src.items())
+        )
+        return VbaProject(
+            present=True,
+            payload_sha256=self.vba_payload_sha256,
+            modules=modules,
+            extraction_status=EXTRACTION_EXTRACTED,
         )
 
 
@@ -98,15 +141,17 @@ class FakeWorkbookWriter:
         self.saved = True
 
     def snapshot(self) -> WorkbookSnapshot:
+        project = self._model.vba_project()
         return WorkbookSnapshot(
             path=self._path,
             sheet_names=tuple(self._model.sheet_names),
             formula_map=dict(self._model.formula_map),
             values=dict(self._model.values),
-            vba_present=self._model.vba_present,
-            vba_payload_sha256=self._model.vba_payload_sha256,
+            vba_present=project.present,
+            vba_payload_sha256=project.payload_sha256,
             structural_fingerprint_id=self._model.structural_fingerprint_id,
             file_sha256=None,
+            vba_project=project,
         )
 
     def close(self) -> None:
@@ -140,15 +185,5 @@ class FakeWriterHarness:
 
     def inspect(self, path) -> WorkbookSnapshot:
         if self.last_writer is not None and self.last_writer.saved:
-            snap = self.last_writer.snapshot()
-            return WorkbookSnapshot(
-                path=str(path),
-                sheet_names=snap.sheet_names,
-                formula_map=snap.formula_map,
-                values=snap.values,
-                vba_present=snap.vba_present,
-                vba_payload_sha256=snap.vba_payload_sha256,
-                structural_fingerprint_id=snap.structural_fingerprint_id,
-                file_sha256=None,
-            )
+            return self.last_writer.snapshot()
         return self._template_snapshot

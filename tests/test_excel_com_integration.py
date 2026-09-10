@@ -108,6 +108,28 @@ def test_com_open_write_recalc_save_reopen(tmp_path):
     assert w.compute_sha256(source_template) == source_sha_before
     assert w.compute_sha256(template_copy) == copy_sha_before
 
+    # 4) integridad SEMÁNTICA de VBA: el Save de Excel puede reescribir
+    #    vbaProject.bin, pero el código de las macros NO debe cambiar.
+    from remasep.services.vba_integrity import (
+        VBA_FAIL,
+        compare_vba_projects,
+        read_vba_project,
+    )
+
+    before_vba = read_vba_project(source_template)
+    after_vba = read_vba_project(working)
+    vba_cmp = compare_vba_projects(before_vba, after_vba)
+    print(
+        f"[com-int] VBA: status={vba_cmp.status} "
+        f"binario_estable={vba_cmp.payload_stable} "
+        f"modulos_before={len(vba_cmp.module_names_before)} "
+        f"code_changed={vba_cmp.code_changed_modules} "
+        f"attrs_changed={vba_cmp.attributes_changed_modules}"
+    )
+    assert vba_cmp.status != VBA_FAIL, vba_cmp.fail_reasons
+    assert vba_cmp.code_changed_modules == ()
+    assert vba_cmp.removed_modules == () and vba_cmp.added_modules == ()
+
     print(
         f"[com-int] {sheet}!{cell}: valor original = {original_value!r} -> "
         f"sentinel {_SENTINEL} escrito y verificado en {working.name}"

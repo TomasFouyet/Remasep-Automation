@@ -176,15 +176,25 @@ alineación semántica con la plantilla oficial). Para el detalle por sprint ver
   `win32com` perezoso) + `FakeWorkbookWriter` (tests) + `ExcelCapability`
   (en WSL `can_generate = False`, mensaje graceful, sin traceback) +
   `GenerationService` (API para la UI, **no** conectada) + CLI
-  `scripts/generate_remasep.py`. Copy-first + salida atómica
-  (`.__working__.xlsm` → `outputs/REMASEP_2026_07_DRAFT.xlsm`), SHA256 de la
+  `scripts/generate_remasep.py`. Copy-first + **workspace temporal único por
+  corrida** (`outputs/.remasep-tmp/<run_id>/working.xlsm`) + promoción atómica
+  (`os.replace` con reintento acotado) a `outputs/REMASEP_2026_07_DRAFT.xlsm`;
+  cleanup conservador best-effort (`CLEANUP_PENDING` si Windows retiene un handle
+  — **sin `taskkill`, sin loop, sin borrado forzado**). SHA256 de la
   plantilla verificado sin cambios. Preflight (duplicados, tipo/negativo,
   faltantes, zero_write_policy, salida fuera de `data/`, no sobrescribe).
   Compatibilidad por `structural_template_fingerprint` leído del manifiesto
   (`stf:dc624775927d4d4d`). Defense-in-depth por celda: nunca sobrescribe una
   fórmula (`TARGET_FORMULA_CONFLICT`). `Value2`, 0 explícito. `CalculateFullRebuild`.
   Verificación posterior: integridad de fórmulas (0 `FORMULA_EXPRESSION_CHANGE`),
-  VBA presente antes/después, 1122 celdas destino, fingerprint. `ControlResult`
+  **integridad SEMÁNTICA de VBA** (`services/vba_integrity.py` + `olefile`:
+  descompresión MS-OVBA §2.4.1 y comparación de código por módulo — falla si
+  desaparece el VBA / cambia el set de módulos / cambia el código; el cambio
+  sólo del binario `vbaProject.bin` por un `Save` de Excel es warning, no fallo
+  —sólo si la comparación semántica se pudo ejecutar—; **fail-closed** si el VBA
+  existe pero no se pudo verificar el código, `reason =
+  VBA_SEMANTIC_CHECK_UNAVAILABLE`), 1122 celdas destino,
+  fingerprint. `ControlResult`
   (`PASS/FAIL_INTERNAL_VALIDATION` / `CONTROL_UNAVAILABLE`) con mapa versionado
   `config/excel_writer_2026/control_map.yaml` — **`writer_integrity_status` es
   independiente de `control_status`** (faltan EGRESOS / recursos / tabla
@@ -193,7 +203,8 @@ alineación semántica con la plantilla oficial). Para el detalle por sprint ver
   `estado_filter_status = PENDING_FUNCTIONAL_CONFIRMATION`.
   `historical_reference_cache_status = KNOWN_STALE_FOR_142_WRITE_READY_VALUES`:
   se escribe el MetricValue del motor actual, nunca el valor cacheado histórico.
-  Tests: 37 unitarios con `FakeWorkbookWriter` + 2 de integración COM marcados
+  Tests: unitarios con `FakeWorkbookWriter` (writer, workspace, VBA semántico,
+  ciclo de vida COM, espera de recálculo) + 2 de integración COM marcados
   `@pytest.mark.excel` (se saltan fuera de Windows). Ver
   [`docs/EXCEL_WRITER.md`](EXCEL_WRITER.md). **Falta**: correr
   `scripts/generate_remasep.py` en Windows con Excel para producir el primer
