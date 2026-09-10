@@ -310,9 +310,12 @@ archivo generado nunca es un entregable MINSAL en este sprint.
    localizar a mano.) Alternativas equivalentes: `REMASEP_OD!AB69`
    (`wi:00170a112286f2273a2a`) o `REMASEP 01!AK118` (`wi:00aab54517c24d1e515f`).
 
-2. Ejecutar `scripts/generate_remasep.py --mode diagnostic` en Windows, con
-   acceso a `data/local/REMASEP_V1.4 Julio 2026.xlsm`,
-   `GENERACION DATOS REMASEP.xlsx` y el export `detalle_citas`.
+2. Ejecutar `scripts/generate_remasep.py --mode production` en Windows (desde
+   Sprint 3.8 es el default): sólo necesita el export `detalle_citas` y
+   `REMASEP_V1.4 Julio 2026.xlsm`; el conocimiento interno viene de
+   `config/runtime_2026/` (ver [`RUNTIME_DECOUPLING.md`](RUNTIME_DECOUPLING.md)).
+   `--mode diagnostic` (que sí abre `GENERACION DATOS REMASEP.xlsx`) queda como
+   camino de comparación dev-only.
 3. Revisar `artifacts/excel_writer/` (integridad de fórmulas/VBA, verificación de
    las 1122 celdas, CONTROL).
 4. Confirmar funcionalmente el filtro por ESTADO para habilitar el modo
