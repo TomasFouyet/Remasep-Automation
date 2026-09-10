@@ -1,0 +1,24 @@
+# Sprint 3.8 — congelado por scripts/build_runtime_assets.py. NO editar a mano.
+# Contrato estructural de la hoja de detalle Medinet + refs de criterio.
+detail_sheet: Atenciones - Detalles de citas
+detail_columns_map:
+  DIA_CITA: D
+  FECHA_NACIMIENTO: G
+  SEXO: H
+  MODALIDAD: J
+  SUCURSAL: K
+  ESPECIALIDAD: M
+  TIPO_DE_CITA: O
+  ESTADO: P
+  PRESTACION: AA
+  PRESTACION_REALIZADA: AB
+criterion_refs:
+- sheet: REMASEP_OD
+  cell: A10
+  value: control odon esp
+- sheet: REMASEP_OD
+  cell: A8
+  value: EVALUACIÓN ODONTOLOGÍA GENERAL
+- sheet: REMASEP_OD
+  cell: A9
+  value: CONTROL ODONTOLOGÍA GENERAL

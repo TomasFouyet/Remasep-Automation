@@ -206,9 +206,27 @@ alineación semántica con la plantilla oficial). Para el detalle por sprint ver
   Tests: unitarios con `FakeWorkbookWriter` (writer, workspace, VBA semántico,
   ciclo de vida COM, espera de recálculo) + 2 de integración COM marcados
   `@pytest.mark.excel` (se saltan fuera de Windows). Ver
-  [`docs/EXCEL_WRITER.md`](EXCEL_WRITER.md). **Falta**: correr
-  `scripts/generate_remasep.py` en Windows con Excel para producir el primer
-  `.xlsm` real y revisar sus artefactos.
+  [`docs/EXCEL_WRITER.md`](EXCEL_WRITER.md). ✅ **Validado end-to-end en Windows +
+  Excel Desktop**: `GENERATED_DIAGNOSTIC_REFERENCE`, `WRITER_INTEGRITY_PASS`,
+  `CONTROL: PASS_INTERNAL_VALIDATION`, 1122/1122 celdas verificadas, plantilla y
+  fórmulas/VBA preservados.
+- **3.8 — Production Runtime Decoupling: ✅ COMPLETE.** El path de producción
+  (`services/production_pipeline.py` + `services/runtime_assets.py`) construye
+  los 1122 `PendingWrite` desde **sólo** el export Medinet + assets de runtime
+  versionados en `config/runtime_2026/` (`bundle.yaml`, `write_manifest.csv`
+  1122 filas, `metric_catalog.csv` 1224 fórmulas legacy, `detail_contract.yaml`,
+  `zero_policy.yaml`). **No** abre `GENERACION DATOS REMASEP.xlsx`, **no** lee
+  `artifacts/`. Assets sin PII (escaneo anti-PII en
+  `scripts/build_runtime_assets.py`, que también auto-verifica OLD-vs-NEW).
+  Validación en runtime → `RuntimeAssetError`
+  (`RUNTIME_ASSET_MISSING / _INCOMPATIBLE / _INVALID`) con mensaje legible, nunca
+  `FileNotFoundError` crudo. `resolve_runtime_root()` funciona desde repo y desde
+  bundle PyInstaller (`sys._MEIPASS`), sin depender del CWD. El workbook legacy
+  queda **dev-only** (`generate_remasep.py --mode diagnostic`, import perezoso).
+  Equivalencia exacta: mismo Medinet → mismos 1122 metric_id / valores /
+  instruction_id / target_sheet-cell que el path validado (scope 2114, sin
+  filtro ESTADO — que sigue `PENDING_FUNCTIONAL_CONFIRMATION`). Ver
+  [`docs/RUNTIME_DECOUPLING.md`](RUNTIME_DECOUPLING.md).
 - **3.7+ — dimensiones de actividad / especialidad** y traducción a la tabla
   larga semántica: **pendiente**.
 - **Modelo de *provenance* / `source`**: `MEDINET` se aplica en 3.1–3.3; el delta

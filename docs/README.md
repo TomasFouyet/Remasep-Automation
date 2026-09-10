@@ -105,6 +105,13 @@
   1122 celdas; `ControlResult` (independiente de `writer_integrity_status`);
   modos `DIAGNOSTIC_REFERENCE` / `PRODUCTION`; archivo `NOT_FOR_SUBMISSION`. UI
   **no** conectada.
+- [`RUNTIME_DECOUPLING.md`](RUNTIME_DECOUPLING.md) — Sprint 3.8: el path de
+  producción construye los 1122 `PendingWrite` desde **sólo** el export Medinet
+  + assets de runtime versionados (`config/runtime_2026/`: `write_manifest.csv`,
+  `metric_catalog.csv`, `detail_contract.yaml`, `zero_policy.yaml`, `bundle.yaml`).
+  **No** abre `GENERACION DATOS REMASEP.xlsx` ni lee `artifacts/`. Assets sin
+  PII, validados en runtime (`RuntimeAssetError` controlado). El workbook legacy
+  queda dev-only (`--mode diagnostic`).
 - [`TEMPLATE_ALIGNMENT.md`](TEMPLATE_ALIGNMENT.md) — estructura de
   `REMASEP 2026_V1.4.xlsm` y candidatos de alineación por etiqueta (Sprint 1.4).
 

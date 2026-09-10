@@ -1,0 +1,5 @@
+# Sprint 3.8 — resolución congelada de la política del cero (evidence-derived 3.7A).
+# Fuente: config/metric_value_producer_2026/zero_write_policy.yaml
+version: runtime_2026
+resolution: WRITE_ZERO
+provenance: metric_value_producer_2026 / Sprint 3.7A
