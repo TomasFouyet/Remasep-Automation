@@ -90,6 +90,13 @@
   `NOT_WRITABLE`) y manifiesto de instrucciones de escritura versionable
   (1122 `WRITE_READY`, todos `EXACT`). `instruction_id` semántico, no coordenada;
   `structural_template_fingerprint` ≠ `file_sha256`. **No escribe Excel.**
+- [`METRIC_VALUE_PRODUCER.md`](METRIC_VALUE_PRODUCER.md) — Sprint 3.7A: **qué
+  valor** alimenta cada `WriteInstruction`. `MetricValue` / `PendingWrite`,
+  modos `PRODUCTION_PERIOD_SCOPE` (2114 registros, sin filtro ESTADO) y
+  `LEGACY_EQUIVALENCE_DIAGNOSTIC` (1364, opt-in). Equivalencia de valores contra
+  la referencia legacy (1122/1122 vs. caché legacy; 980 MATCH / 142 MISMATCH por
+  caché `AF` obsoleta vs. valor reevaluado) y `zero_write_policy = WRITE_ZERO`
+  (evidence-derived). **No escribe Excel.**
 - [`TEMPLATE_ALIGNMENT.md`](TEMPLATE_ALIGNMENT.md) — estructura de
   `REMASEP 2026_V1.4.xlsm` y candidatos de alineación por etiqueta (Sprint 1.4).
 

@@ -19,6 +19,7 @@ from remasep.services.medinet_analysis import (
     ANALYSIS_MODE_REAL,
     MedinetAnalysisService,
     legacy_age_years,
+    processing_scope_frame,
 )
 
 PERIOD = Period(8, 2026)
@@ -552,6 +553,33 @@ def test_rejects_non_xlsx(tmp_path, service):
     bogus.write_text("a,b,c\n1,2,3\n", encoding="utf-8")
     with pytest.raises(SourceValidationError, match="xlsx"):
         service.analyze(bogus, PERIOD)
+
+
+def test_processing_scope_frame_matches_processing_scope_records(make_medinet, service):
+    path = make_medinet(
+        [
+            _row(dia=date(2026, 8, 5)),
+            _row(dia=date(2026, 8, 20)),
+            _row(dia=date(2026, 7, 30)),  # otro período
+            _row(dia=date(2026, 9, 1)),   # otro período
+        ]
+    )
+    frame = processing_scope_frame(path, PERIOD)
+    assert len(frame) == service.analyze(path, PERIOD).processing_scope_records == 2
+
+
+def test_processing_scope_frame_excludes_out_of_period_rows(make_medinet):
+    path = make_medinet(
+        [
+            _row(dia=date(2026, 8, 10)),
+            _row(dia=date(2026, 6, 10)),
+            _row(dia=date(2027, 8, 10)),
+        ]
+    )
+    frame = processing_scope_frame(path, PERIOD)
+    assert len(frame) == 1
+    assert frame["DIA_CITA"].dt.month.eq(8).all()
+    assert frame["DIA_CITA"].dt.year.eq(2026).all()
 
 
 def test_legacy_rules_config_is_flagged_pending():

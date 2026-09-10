@@ -168,6 +168,86 @@ def structural_empty_mask(medinet: MedinetFrame) -> pd.Series:
     return mask.fillna(False).astype(bool)
 
 
+@dataclass
+class _ScopeSelection:
+    """Máscaras de validez y alcance de procesamiento (definición única)."""
+
+    structural_empty: pd.Series
+    active: pd.Series
+    dia_bad: pd.Series
+    fnac_present_bad: pd.Series
+    sexo_empty: pd.Series
+    tipo_empty: pd.Series
+    prest_empty: pd.Series
+    invalid_mask: pd.Series
+    valid_mask: pd.Series
+    birth_after: pd.Series
+    scope_mask: pd.Series
+
+
+def _scope_selection(medinet: MedinetFrame, period: Period) -> _ScopeSelection:
+    """Calcula, una sola vez, las máscaras que definen ``processing_scope_records``.
+
+    ``scope_mask`` = fila estructuralmente válida (``DIA_CITA`` parseable,
+    ``FECHA_NACIMIENTO`` bien formada si está presente, ``SEXO`` y
+    ``TIPO_DE_CITA`` no vacíos) **y** dentro del mes/año del período. Es el único
+    subconjunto sobre el que se calcula el REMASEP mensual. No aplica ningún
+    filtro por ESTADO.
+    """
+    frame = medinet.frame
+    masks = medinet.blank_masks
+    structural_empty = structural_empty_mask(medinet)
+    active = ~structural_empty
+    dia = frame["DIA_CITA"]
+    fnac = frame["FECHA_NACIMIENTO"]
+    dia_bad = active & dia.isna()
+    fnac_blank = masks["FECHA_NACIMIENTO"]
+    fnac_present_bad = active & (~fnac_blank) & fnac.isna()
+    sexo_empty = active & masks["SEXO"]
+    tipo_empty = active & masks["TIPO_DE_CITA"]
+    prest_empty = active & masks["PRESTACION"]
+    invalid_mask = dia_bad | fnac_present_bad | sexo_empty | tipo_empty
+    valid_mask = active & ~invalid_mask
+    birth_after = active & (~dia.isna()) & (~fnac_blank) & (~fnac.isna()) & (fnac > dia)
+    scope_mask = (
+        valid_mask
+        & dia.dt.year.eq(period.year)
+        & dia.dt.month.eq(period.month)
+    ).fillna(False).astype(bool)
+    return _ScopeSelection(
+        structural_empty=structural_empty,
+        active=active,
+        dia_bad=dia_bad,
+        fnac_present_bad=fnac_present_bad,
+        sexo_empty=sexo_empty,
+        tipo_empty=tipo_empty,
+        prest_empty=prest_empty,
+        invalid_mask=invalid_mask,
+        valid_mask=valid_mask,
+        birth_after=birth_after,
+        scope_mask=scope_mask,
+    )
+
+
+def processing_scope_frame(
+    path: str | Path,
+    period: Period,
+    *,
+    sheet_name: str | int | None = None,
+) -> pd.DataFrame:
+    """Devuelve las filas semánticas del ``processing_scope`` (válidas ∩ período).
+
+    Mismo contrato que :attr:`MedinetAnalysisResult.processing_scope_records`:
+    ``len(processing_scope_frame(path, period)) ==
+    MedinetAnalysisService().analyze(path, period).processing_scope_records``.
+    Sin filtro por ESTADO. Pensado para alimentar el productor de valores
+    (Sprint 3.7A) sin exponer datos individuales fuera de un agregado.
+    """
+    medinet = read_medinet(path, sheet_name=sheet_name)
+    selection = _scope_selection(medinet, period)
+    return medinet.frame.loc[selection.scope_mask].reset_index(drop=True)
+
+
 def _iso_date(value: object) -> str | None:
     if value is None or pd.isna(value):
         return None
@@ -236,24 +316,22 @@ class MedinetAnalysisService:
         # Una fila es estructuralmente vacía solo si TODOS los campos semánticos
         # reconocidos están vacíos (fórmulas AC:AL del workbook legacy arrastradas
         # más allá de las atenciones reales). No se cuentan ni generan problemas.
-        structural_empty = structural_empty_mask(medinet)
-        active = ~structural_empty
-        structural_empty_rows = int(structural_empty.sum())
+        selection = _scope_selection(medinet, period)
+        active = selection.active
+        structural_empty_rows = int(selection.structural_empty.sum())
         total = int(active.sum())
 
         dia = frame["DIA_CITA"]
         fnac = frame["FECHA_NACIMIENTO"]
-
-        dia_bad = active & dia.isna()
         fnac_blank = masks["FECHA_NACIMIENTO"]
-        fnac_present_bad = active & (~fnac_blank) & fnac.isna()
-        sexo_empty = active & masks["SEXO"]
-        tipo_empty = active & masks["TIPO_DE_CITA"]
-        prest_empty = active & masks["PRESTACION"]
 
-        invalid_mask = dia_bad | fnac_present_bad | sexo_empty | tipo_empty
-        valid_mask = active & ~invalid_mask
-        birth_after = active & (~dia.isna()) & (~fnac_blank) & (~fnac.isna()) & (fnac > dia)
+        dia_bad = selection.dia_bad
+        fnac_present_bad = selection.fnac_present_bad
+        sexo_empty = selection.sexo_empty
+        tipo_empty = selection.tipo_empty
+        prest_empty = selection.prest_empty
+        valid_mask = selection.valid_mask
+        birth_after = selection.birth_after
 
         # --- período y alcance de procesamiento -------------------------
         valid_dates = dia[valid_mask]
@@ -267,11 +345,7 @@ class MedinetAnalysisService:
 
         # `scope_mask`: registro estructuralmente válido Y dentro del mes/año.
         # Es el ÚNICO subconjunto sobre el que se calcula el REMASEP mensual.
-        scope_mask = (
-            valid_mask
-            & dia.dt.year.eq(period.year)
-            & dia.dt.month.eq(period.month)
-        ).fillna(False).astype(bool)
+        scope_mask = selection.scope_mask
         processing_scope_records = int(scope_mask.sum())
 
         # --- edad (semántica DATEDIF "Y" + excepción legacy) ---------------

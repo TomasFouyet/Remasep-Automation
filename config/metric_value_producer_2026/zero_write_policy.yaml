@@ -1,0 +1,54 @@
+# =============================================================================
+# Política de escritura del CERO — Sprint 3.7A (Medinet Metric Value Producer)
+# =============================================================================
+#
+# Responde: cuando el valor producido para una WriteInstruction es 0, ¿se escribe
+# un 0 explícito en la celda destino o se preserva el blanco?
+#
+# Este archivo NO impone una política a priori. Su valor se DERIVA de la
+# evidencia empírica que recoge `scripts/build_metric_values.py`
+# (`artifacts/metric_value_producer/zero_semantics_analysis.csv`): qué hay
+# realmente en la celda final oficial (`REMASEP_V1.4 Julio 2026.xlsm`) y en la
+# plantilla base/incompleta (`2026-7 REMASEP_V1.4.xlsm`) cuando el valor legacy
+# de origen es 0. El script vuelve a calcular la política a partir de esa
+# evidencia y AVISA si difiere de este archivo (no lo sobrescribe).
+#
+# `resolution` ∈
+#   WRITE_ZERO              -> escribir 0 explícito
+#   PRESERVE_BLANK_FOR_ZERO -> dejar la celda en blanco cuando el valor es 0
+#   FORM_SPECIFIC           -> la política depende de la forma/sección (ver `by_form`)
+#   UNRESOLVED              -> evidencia insuficiente; NO se decide
+#
+# UNRESOLVED es un resultado válido. Sprint 3.7A NO escribe Excel: esta política
+# sólo se declara y se contrasta con la evidencia.
+
+version: metric_value_producer_2026
+status: evidence_derived_pending_functional_validation
+disclaimer: >-
+  Política de forma (cómo se representa el 0), no de fondo (qué población entra).
+  Derivada de la comparación valor-a-valor contra la referencia legacy y la
+  plantilla final oficial. Pendiente de validación funcional por Fundación Gantz
+  / MINSAL.
+
+# Evidencia observada (corrida real, export directo Julio 2026):
+#   - 935 de las 1122 WriteInstructions tienen valor legacy de origen == 0.
+#   - En la plantilla final oficial: 917 de esas celdas contienen 0 explícito,
+#     0 están en blanco, 18 contienen otro valor (mismatch — ver
+#     value_mismatch_clusters.csv).
+#   - La plantilla base/incompleta también trae 0 explícito (nunca blanco) en
+#     esas celdas: el proceso legacy escribe ceros, no deja blancos.
+# => la evidencia es concluyente y consistente: WRITE_ZERO.
+resolution: WRITE_ZERO
+
+# Resolución por forma (sólo se consulta si `resolution: FORM_SPECIFIC`).
+by_form: {}
+
+# Umbral mínimo de evidencia para abandonar UNRESOLVED.
+evidence:
+  min_zero_cases: 30
+  min_consistency_ratio: 0.98
+  observed:
+    zero_source_cases: 935
+    source_zero_target_zero: 917
+    source_zero_target_blank: 0
+    source_zero_target_other: 18

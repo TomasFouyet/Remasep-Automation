@@ -11,7 +11,7 @@ alineación semántica con la plantilla oficial). Para el detalle por sprint ver
 | --- | --- | --- |
 | **1 — Reverse Engineering** | Inventario del workbook, dependencias, lógica legacy, plantilla oficial, UI shell | **COMPLETE** |
 | **2 — Medinet & Legacy Equivalence** | Ingesta Medinet real, `AC:AL`, agregaciones directas, cierre por dependencias, `SUM`/`IF` downstream | **COMPLETE** |
-| **3 — Semantic Metrics** | Inventario semántico (3.1 ✅), mapeo de dimensiones sexo/edad/alcance/código (3.2 ✅), readiness técnica + cola de revisión (3.3 ✅), delta del REMASEP final + provenance de fuente (3.4 ✅), alineación semántica con la plantilla oficial (3.5 ✅) | **IN PROGRESS** |
+| **3 — Semantic Metrics** | Inventario semántico (3.1 ✅), mapeo de dimensiones sexo/edad/alcance/código (3.2 ✅), readiness técnica + cola de revisión (3.3 ✅), delta del REMASEP final + provenance de fuente (3.4 ✅), alineación semántica con la plantilla oficial (3.5 ✅), writable target mapping (3.6 ✅), metric value producer + equivalencia de valores (3.7A ✅) | **IN PROGRESS** |
 | **4 — Additional Sources / Complete Dataset** | Adaptador de egresos, cálculo de recursos, dataset golden | PENDING |
 | **5 — Official Template Mapping** | Mapping semántico generador/Medinet → plantilla MINSAL (alineación de candidatos hecha en 3.5; escritura Excel pendiente) | PENDING |
 | **6 — Excel Generation / CONTROL** | Escritura vía Excel COM (Windows), recálculo, verificación `CONTROL` | PENDING |
@@ -146,9 +146,29 @@ alineación semántica con la plantilla oficial). Para el detalle por sprint ver
   UNRESOLVED` y `estado_filter_status = PENDING_FUNCTIONAL_CONFIRMATION`
   (precondiciones del 3.7). Ver
   [`docs/WRITABLE_TARGET_MAPPING.md`](WRITABLE_TARGET_MAPPING.md).
-- **3.7+ — value producer + Excel writer**: interfaz `MetricValue` definida
-  (`source_metric_id · value · period · producer_version`, sin PII); el valor se
-  calculará desde `processing_scope_records`. **Pendiente.**
+- **3.7A — Medinet Metric Value Producer & Reference Value Equivalence: ✅
+  COMPLETE.** Productor real de `MetricValue` para MEDINET, reutilizando el motor
+  legacy (`legacy_aggregation` + `legacy_transform` + cierre de dependencias) —
+  una sola implementación, sin reimplementar fórmulas. **No escribe Excel.**
+  Modos `PRODUCTION_PERIOD_SCOPE` (registros = `processing_scope_records`,
+  Julio 2026 = 2114, **sin** filtro por ESTADO, `input_scope = PERIOD_ONLY`) y
+  `LEGACY_EQUIVALENCE_DIAGNOSTIC` (opt-in explícito, 1364 = detalle legacy, sólo
+  para el estudio de equivalencia). `join_metric_values_with_manifest(...) →
+  PendingWrite` + `check_write_completeness(...)` (sin *last-one-wins*).
+  Resultado real (Julio 2026): **1122/1122 `MetricValue`**, 0 conflictos de tipo,
+  completitud missing/duplicate/orphan = 0. Equivalencia contra la plantilla
+  final oficial: **1122/1122 MATCH vs. el valor cacheado por el Excel legacy**;
+  980 MATCH / 142 MISMATCH vs. el valor reevaluado, y los 142 son la caché
+  obsoleta de `AF`/edad (`docs/TECHNICAL_OVERVIEW.md §8`), no un error del
+  productor. Diagnóstico: **1122/1122 `MetricValue` idénticos al valor legacy
+  reevaluado** (`EXACT_EQUIVALENCE`). Semántica del cero: 935 casos `source == 0`,
+  917 target 0, **0 target blanco** → `zero_write_policy = WRITE_ZERO`
+  (evidence-derived, `config/metric_value_producer_2026/zero_write_policy.yaml`).
+  `estado_filter_status = PENDING_FUNCTIONAL_CONFIRMATION` (el modo productivo no
+  lo aplica; el diagnóstico no lo promueve a regla). Ver
+  [`docs/METRIC_VALUE_PRODUCER.md`](METRIC_VALUE_PRODUCER.md).
+- **3.7+ — Excel writer**: escritura vía COM + verificación `CONTROL`.
+  **Pendiente.**
 - **3.7+ — dimensiones de actividad / especialidad** y traducción a la tabla
   larga semántica: **pendiente**.
 - **Modelo de *provenance* / `source`**: `MEDINET` se aplica en 3.1–3.3; el delta

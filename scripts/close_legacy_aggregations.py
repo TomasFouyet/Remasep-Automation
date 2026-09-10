@@ -151,6 +151,11 @@ class ClosureResult:
     # sin recalcular el grafo ni volver a abrir el workbook.
     topo_order: list[tuple[str, str]] = field(default_factory=list)
     cached: dict[str, dict[str, object]] = field(default_factory=dict)
+    # Mapa campo semántico -> letra de columna en la hoja de detalle legacy. Las
+    # fórmulas COUNTIF(S) referencian columnas por LETRA (``!$C:$C``); reevaluar
+    # esas fórmulas sobre otro export exige alinear las filas a estas mismas
+    # letras. Expuesto para el productor de valores (Sprint 3.7A).
+    detail_columns_map: dict[str, str] = field(default_factory=dict)
 
     def medinet_nodes(self) -> list[Node]:
         return [n for n in self.nodes.values() if n.medinet]
@@ -359,7 +364,9 @@ def close_legacy_aggregations(path: str | Path) -> ClosureResult:
 
     try:
         detail_sheet = _resolve_detail_sheet(wb_v)
-        active_rows, physical, structural_empty, _sem = _build_dataset(wb_v[detail_sheet])
+        active_rows, physical, structural_empty, detail_columns_map = _build_dataset(
+            wb_v[detail_sheet]
+        )
 
         present = [s for s in TARGET_SHEETS if s in wb_f.sheetnames]
         sheet_set = set(present)
@@ -537,6 +544,7 @@ def close_legacy_aggregations(path: str | Path) -> ClosureResult:
         generated_at=datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
         topo_order=order,
         cached=cached,
+        detail_columns_map=detail_columns_map,
     )
 
 
