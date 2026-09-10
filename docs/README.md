@@ -109,8 +109,8 @@
   `ExcelCapability` (en WSL `can_generate = False`, graceful); copy-first +
   salida atómica; preflight; verificación de integridad de fórmulas/VBA y de las
   1122 celdas; `ControlResult` (independiente de `writer_integrity_status`);
-  modos `DIAGNOSTIC_REFERENCE` / `PRODUCTION`; archivo `NOT_FOR_SUBMISSION`. UI
-  **no** conectada.
+  modos `DIAGNOSTIC_REFERENCE` / `PRODUCTION`; archivo `NOT_FOR_SUBMISSION`.
+  Conectado a la UI desde el Sprint 3.10 (ver [`UI.md`](UI.md)).
 - [`RUNTIME_DECOUPLING.md`](RUNTIME_DECOUPLING.md) — Sprint 3.8: el path de
   producción construye los 1122 `PendingWrite` desde **sólo** el export Medinet
   + assets de runtime versionados (`config/runtime_2026/`: `write_manifest.csv`,
@@ -120,6 +120,16 @@
   queda dev-only (`--mode diagnostic`).
 - [`TEMPLATE_ALIGNMENT.md`](TEMPLATE_ALIGNMENT.md) — estructura de
   `REMASEP 2026_V1.4.xlsm` y candidatos de alineación por etiqueta (Sprint 1.4).
+
+## UI de escritorio
+
+- [`UI.md`](UI.md) — Sprint 3.10: flujo MEDINET completo sin terminal
+  (Inicio → Nuevo informe → Análisis → **Resumen mensual Medinet** → Generar →
+  Resultado). Modelo `MonthlyMedinetSummary` (adaptador de sólo lectura sobre el
+  pipeline validado, sin PII), export a **PDF** de una página con
+  `QPdfWriter`/`QPainter` (sin WebEngine), generación del REMASEP vía
+  `GenerationService`, y mapeo de errores backend → mensajes humanos. La UI ya
+  **está conectada** al backend; el CLI sigue igual.
 
 ## Sprints
 

@@ -1,489 +1,353 @@
-"""Tests de la maqueta de UI (UI Sprint 1).
+"""Sprint 3.10 — flujo de UI MEDINET (Qt offscreen, sin Excel real).
 
-Qt corre en modo offscreen (ver conftest.py); no se requiere display físico.
-No se leen archivos reales ni datos de pacientes.
+Inicio → Nuevo informe → Análisis → Resumen mensual → Generar → Resultado.
+
+Los tests usan las rutas síncronas (`run_now`) para ser deterministas; el hilo
+de fondo que arranca cada pantalla se detiene con ``_teardown`` antes.
 """
 
 from __future__ import annotations
 
-import pytest
+from datetime import date
+from pathlib import Path
 
-from remasep.services.mock_remasep import (
-    CLASSIFICATION_OPTIONS,
-    IGNORE_OPTION,
-    AnalysisResult,
-    MockRemasepService,
-    Period,
-    ReviewOutcome,
-    project_review,
-)
-from remasep.ui.styles import format_int
+import pytest
+from PySide6.QtWidgets import QApplication
+
+from remasep.services.common import Period
+from remasep.ui.errors import HumanError
+from remasep.ui.workers import GenerationOutcome
 
 pytestmark = pytest.mark.usefixtures("qapp")
 
-
-# --- Mock service --------------------------------------------------------
-
-
-def test_mock_service_analyze_shapes():
-    result = MockRemasepService().analyze(Period(8, 2026), demo=True)
-
-    assert isinstance(result, AnalysisResult)
-    assert result.total_records == 2006
-    # Invariante: total = clasificadas + ignoradas + sin_clasificar.
-    assert (
-        result.classified_records
-        + result.ignored_records
-        + result.unclassified_records
-        == result.total_records
-    )
-    assert result.ignored_records == 8
-    assert result.unclassified_records == sum(e.count for e in result.exceptions)
-    assert result.review_groups == len(result.exceptions) == 3
-    # sin_clasificar (N registros) y grupos por revisar (M tipos) son distintos.
-    assert result.unclassified_records != result.review_groups
-
-    assert [v.status for v in result.validations] == ["ok"] * 5
-    assert [m.name for m in result.modules] == ["REMASEP 01", "B2 ANEXO", "REMASEP OD"]
-    assert all(m.detected for m in result.modules)
-    assert [s.available for s in result.other_sources] == [False, False]
-
-    for exception in result.exceptions:
-        assert exception.possible_categories == CLASSIFICATION_OPTIONS
-        assert exception.count >= 1
+_MEDINET_REAL = Path("data/local/detalle_citas - 2026-09-07T123630.940.xlsx")
 
 
-def test_analysis_result_pending_logic():
-    result = MockRemasepService().analyze(Period(8, 2026), demo=True)
-    assert result.pending() == 3
-    assert not result.can_continue()
-
-    resolved = {e.value for e in result.exceptions}
-    assert result.pending(resolved) == 0
-    assert result.can_continue(resolved)
-
-
-def test_analysis_result_invariant_is_enforced():
-    from remasep.services.mock_remasep import ExceptionItem
-
-    base = {
-        "period": Period(8, 2026),
-        "validations": [],
-        "modules": [],
-        "other_sources": [],
-        "exceptions": [ExceptionItem("X", 4, "sin clasificación")],
-    }
-
-    # total != clasificadas + ignoradas + sin_clasificar
-    with pytest.raises(ValueError, match="inconsistente"):
-        AnalysisResult(
-            total_records=100, classified_records=90, ignored_records=3,
-            unclassified_records=4, **base,
-        )
-
-    # suma correcta, pero los ExceptionItem (4) no suman unclassified_records (5)
-    with pytest.raises(ValueError, match="ExceptionItem"):
-        AnalysisResult(
-            total_records=100, classified_records=90, ignored_records=5,
-            unclassified_records=5, **base,
-        )
-
-    # combinación coherente: no lanza
-    ok = AnalysisResult(
-        total_records=100, classified_records=91, ignored_records=5,
-        unclassified_records=4, **base,
-    )
-    assert ok.review_groups == 1
-
-
-def test_period_label():
-    assert Period(8, 2026).label == "Agosto 2026"
-    assert Period(12, 2025).label == "Diciembre 2025"
-
-
-# --- Proyección tras revisión ---------------------------------------
-
-
-def _analysis() -> AnalysisResult:
-    return MockRemasepService().analyze(Period(8, 2026), demo=True)
-
-
-def test_project_review_no_decisions_matches_analysis():
-    result = _analysis()
-    outcome = project_review(result, {})
-
-    assert isinstance(outcome, ReviewOutcome)
-    assert outcome.final_classified == result.classified_records
-    assert outcome.final_ignored == result.ignored_records
-    assert outcome.final_unclassified == result.unclassified_records
-    assert outcome.pending_groups == result.review_groups
-    assert outcome.resolved_groups == 0
-    assert not outcome.fully_reviewed
-
-
-def test_project_review_all_classified():
-    result = _analysis()
-    decisions = {e.value: CLASSIFICATION_OPTIONS[0] for e in result.exceptions}
-    outcome = project_review(result, decisions)
-
-    assert outcome.final_unclassified == 0
-    assert outcome.pending_groups == 0
-    assert outcome.fully_reviewed
-    assert outcome.final_ignored == result.ignored_records
-    assert outcome.final_classified == result.classified_records + result.unclassified_records
-    assert (
-        outcome.final_classified + outcome.final_ignored + outcome.final_unclassified
-        == result.total_records
-    )
-
-
-def test_project_review_mixed_decisions():
-    result = _analysis()
-    first, second, third = result.exceptions
-    decisions = {
-        first.value: CLASSIFICATION_OPTIONS[0],  # clasifica
-        third.value: IGNORE_OPTION,  # ignora
-        # 'second' queda sin decisión -> pendiente
-    }
-    outcome = project_review(result, decisions)
-
-    assert outcome.pending_groups == 1
-    assert outcome.resolved_groups == 2
-    assert outcome.final_unclassified == second.count
-    assert outcome.final_ignored == result.ignored_records + third.count
-    assert outcome.final_classified == result.classified_records + first.count
-    assert (
-        outcome.final_classified + outcome.final_ignored + outcome.final_unclassified
-        == result.total_records
-    )
-
-
-def test_review_outcome_invariant_enforced():
-    with pytest.raises(ValueError, match="ReviewOutcome inconsistente"):
-        ReviewOutcome(
-            total_records=100,
-            final_classified=50,
-            final_ignored=10,
-            final_unclassified=10,
-            resolved_groups=0,
-            pending_groups=0,
-        )
-
-
-def test_appstate_review_outcome_none_without_analysis(window):
-    assert window.state.analysis is None
-    assert window.state.review_outcome() is None
-
-
-# --- MainWindow / navegación --------------------------------------
+def _row(*, estado="Atendido", sexo="Mujer", dia=date(2026, 7, 10)):
+    return [
+        dia, date(2016, 1, 1), sexo, "Centro", "Ortodoncia",
+        "CONSULTA", "prestacion", estado, "Presencial", "",
+    ]
 
 
 @pytest.fixture
 def window():
     from remasep.ui.main_window import MainWindow
 
-    return MainWindow()
+    win = MainWindow()
+    win.show()  # con QT_QPA_PLATFORM=offscreen es seguro y hace fiable isVisible()
+    yield win
+    win.close()
 
 
-def test_main_window_starts_on_home(window):
+@pytest.fixture
+def medinet_file(make_medinet):
+    return make_medinet(
+        [_row(estado="Atendido") for _ in range(20)]
+        + [_row(estado="En Sala de Espera") for _ in range(4)]
+        + [_row(estado="Cancelado") for _ in range(6)]
+        + [_row(estado="No Se Presenta") for _ in range(3)]
+    )
+
+
+@pytest.fixture
+def template_file(tmp_path):
+    p = tmp_path / "REMASEP_plantilla.xlsm"
+    p.write_bytes(b"PK\x03\x04 placeholder")
+    return p
+
+
+# --- helpers ---------------------------------------------------------------
+
+
+def _drain() -> None:
+    QApplication.instance().processEvents()
+
+
+def _fill_new_report(window, medinet, template, *, month=7, year=2026):
+    nr = window.screens["new_report"]
+    nr.month_combo.setCurrentIndex(month - 1)
+    nr.year_spin.setValue(year)
+    nr.medinet_selector.set_selection(Path(medinet))
+    nr.template_selector.set_selection(Path(template))
+    nr._sync_state()
+    return nr
+
+
+def _run_analysis(window) -> None:
+    """Lanza el análisis y lo resuelve de forma determinista."""
+    window.screens["new_report"]._analyze()      # navega a 'analysis' + hilo
+    window.screens["analysis"]._teardown()        # detiene el hilo de fondo
+    _drain()                                      # entrega su señal encolada
+    window.screens["analysis"].run_now()          # ejecución síncrona (idempotente)
+
+
+def _run_generate(window) -> None:
+    window.navigate("generate")                    # on_enter arranca el hilo
+    window.screens["generate"]._teardown()
+    _drain()
+    window.screens["generate"].run_now()
+
+
+def _all_label_text(widget) -> str:
+    from PySide6.QtWidgets import QLabel
+
+    return " \n ".join(child.text() for child in widget.findChildren(QLabel))
+
+
+# ---------------------------------------------------------------------------
+# Navegación / arranque
+# ---------------------------------------------------------------------------
+
+
+def test_starts_on_home(window):
     assert window.current_screen_name == "home"
-    assert set(window.screens) == {"home", "new_report", "analysis", "exceptions", "summary"}
+    assert window.screens["home"].start_button.text() == "Nuevo informe"
 
 
-def test_home_button_navigates_to_new_report(window):
+def test_home_goes_to_new_report(window):
     window.screens["home"].start_button.click()
     assert window.current_screen_name == "new_report"
 
 
 def test_default_period_is_previous_month(window):
-    # conftest no congela la fecha; solo comprobamos coherencia del estado.
-    assert 1 <= window.state.month <= 12
-    assert window.state.year >= 2024
-
-
-def test_default_period_uses_local_previous_month():
-    import datetime as dt
-
     from remasep.ui.main_window import _default_period
 
-    today = dt.date.today()  # noqa: DTZ011 - se compara contra la misma base local
-    expected = today.replace(day=1) - dt.timedelta(days=1)
-    assert _default_period() == (expected.month, expected.year)
+    assert (window.state.month, window.state.year) == _default_period()
 
 
-def test_period_selection_persists_through_flow(window):
-    new_report = window.screens["home"].start_button.click() or window.screens["new_report"]
-    new_report.month_combo.setCurrentIndex(7)  # Agosto
-    new_report.year_spin.setValue(2026)
+def test_step_indicator_advances_through_flow(window, medinet_file, template_file):
+    window.navigate("new_report")
+    assert window.screens["new_report"].steps.current == 0
 
-    assert window.state.month == 8
-    assert window.state.year == 2026
-
-    new_report.demo_button.click()
+    _fill_new_report(window, medinet_file, template_file)
+    window.screens["new_report"]._analyze()
     assert window.current_screen_name == "analysis"
-    assert window.state.analysis.period_label == "Agosto 2026"
-    assert "Agosto 2026" in window.screens["analysis"].period_label.text()
+    assert window.screens["analysis"].steps.current == 1
+
+    window.screens["analysis"]._teardown()
+    _drain()
+    window.screens["analysis"].run_now()
+    assert window.current_screen_name == "dashboard"
+    assert window.screens["dashboard"].steps.current == 2
 
 
-def test_demo_mode_runs_analysis(window):
+# ---------------------------------------------------------------------------
+# Nuevo informe: selección de archivos + validación
+# ---------------------------------------------------------------------------
+
+
+def test_analyze_disabled_until_both_files_selected(window, medinet_file, template_file):
     window.navigate("new_report")
-    window.screens["new_report"].demo_button.click()
+    nr = window.screens["new_report"]
+    assert not nr.analyze_button.isEnabled()
 
-    assert window.state.demo is True
-    assert window.state.analysis is not None
+    nr.medinet_selector.set_selection(Path(medinet_file))
+    nr._sync_state()
+    assert not nr.analyze_button.isEnabled()      # falta la plantilla
+
+    nr.template_selector.set_selection(Path(template_file))
+    nr._sync_state()
+    assert nr.analyze_button.isEnabled()
+
+
+def test_file_selector_shows_name_and_ok_state(window, medinet_file):
+    window.navigate("new_report")
+    sel = window.screens["new_report"].medinet_selector
+    sel.set_selection(Path(medinet_file))
+    assert sel._name_label.text() == Path(medinet_file).name
+    assert sel.has_valid_extension
+    assert "✓" in sel._status_label.text()
+
+
+def test_file_selector_flags_wrong_extension(window, tmp_path):
+    window.navigate("new_report")
+    bad = tmp_path / "cosa.txt"
+    bad.write_text("x")
+    nr = window.screens["new_report"]
+    nr.medinet_selector.set_selection(bad)
+    assert not nr.medinet_selector.has_valid_extension
+    nr._sync_state()
+    assert not nr.analyze_button.isEnabled()
+
+
+def test_period_selection_persists_into_state(window, medinet_file, template_file):
+    window.navigate("new_report")
+    _fill_new_report(window, medinet_file, template_file, month=3, year=2027)
+    assert (window.state.month, window.state.year) == (3, 2027)
+    assert window.state.period == Period(3, 2027)
+
+
+# ---------------------------------------------------------------------------
+# Análisis -> dashboard
+# ---------------------------------------------------------------------------
+
+
+def test_analysis_produces_summary_that_matches_backend(window, medinet_file, template_file):
+    window.navigate("new_report")
+    _fill_new_report(window, medinet_file, template_file)
+    _run_analysis(window)
+
+    s = window.state.summary
+    assert s is not None
+    assert window.current_screen_name == "dashboard"
+    assert s.period_scope_records == 33          # 20 + 4 + 6 + 3
+    assert s.included_records == 24              # 20 Atendido + 4 En Sala de Espera
+    assert s.excluded_records == 9
+    assert s.included_records + s.excluded_records == s.period_scope_records
+
+    db = window.screens["dashboard"]
+    assert db.kpi_period._value.text() == "33"
+    assert db.kpi_included._value.text() == "24"
+    assert db.kpi_excluded._value.text() == "9"
+    assert len(db.chart_estado._bars) == len(s.estado_distribution)
+    assert len(db.chart_sex._bars) == len(s.sex_distribution)
+
+
+def test_analysis_error_shows_human_message_not_crash(window, tmp_path, template_file):
+    window.navigate("new_report")
+    broken = tmp_path / "roto.xlsx"
+    broken.write_text("no soy un excel")
+    _fill_new_report(window, broken, template_file)
+    _run_analysis(window)
+
+    # no navega al dashboard; muestra un banner de error humano
     assert window.current_screen_name == "analysis"
+    err = window.screens["analysis"]._error
+    assert err.isVisible()
+    assert err._title.text()
+    assert "Traceback" not in err._title.text()
+    assert "Traceback" not in err._detail.text()
+    assert isinstance(window.state.analysis_error, HumanError)
 
 
-# --- Análisis REAL vs DEMO (Sprint 2.1) ---------------------------
-
-
-def _demo_rows():
-    from datetime import date
-
-    return [
-        [date(2026, 8, 5), date(1990, 1, 1), "F", "S", "E", "CONTROL PERIODONCIA", "x",
-         "ATENDIDO", "Presencial", ""],
-        [date(2026, 8, 9), date(1985, 6, 6), "M", "S", "E", "otra cita", "algo", "ANULADO",
-         "Telemedicina", ""],
-    ]
-
-
-def test_demo_button_still_uses_mock_service(window):
+def test_dashboard_declares_medinet_source_and_disclaimer(window, medinet_file, template_file):
     window.navigate("new_report")
-    window.screens["new_report"].demo_button.click()
-    assert window.state.analysis_mode == "DEMO"
-    assert window.state.analysis is not None  # MockRemasepService
-    assert window.state.medinet_analysis is None
-    assert window.screens["analysis"].badge.text() == "DATOS DE DEMOSTRACIÓN"
+    _fill_new_report(window, medinet_file, template_file)
+    _run_analysis(window)
+
+    text = _all_label_text(window.screens["dashboard"])
+    assert "MEDINET" in text.upper()
+    assert "no representa todavía la totalidad" in text
+    assert "Tabla quirúrgica" in text  # card "Pendientes de otras fuentes"
 
 
-def test_real_file_uses_medinet_analysis_service(window, make_medinet):
-    path = make_medinet(_demo_rows())
-    window.navigate("new_report")
-    new_report = window.screens["new_report"]
-    new_report.month_combo.setCurrentIndex(7)
-    new_report.year_spin.setValue(2026)
-    new_report.medinet_selector.set_selection(path)
-    assert new_report.analyze_button.isEnabled() is True
-
-    new_report.analyze_button.click()
-
-    assert window.current_screen_name == "analysis"
-    assert window.state.analysis_mode == "REAL"
-    assert window.state.analysis is None
-    result = window.state.medinet_analysis
-    assert result is not None
-    assert result.analysis_mode == "REAL"
-    assert result.total_records == 2
-    assert result.legacy_counts["AH"] == 1  # "CONTROL PERIODONCIA"
-
-
-def test_analysis_screen_distinguishes_real_and_demo(window, make_medinet):
-    analysis = window.screens["analysis"]
-
-    # DEMO
-    window.navigate("new_report")
-    window.screens["new_report"].demo_button.click()
-    assert analysis.badge.text() == "DATOS DE DEMOSTRACIÓN"
-    assert analysis.badge.property("badge") == "demo"
-    assert analysis.review_button.isHidden() is False
-    assert analysis.summary_button.isHidden() is True
-    assert analysis._registros_card.isHidden() is True
-
-    # REAL
-    window.navigate("new_report")
-    window.screens["new_report"].medinet_selector.set_selection(make_medinet(_demo_rows()))
-    window.screens["new_report"].analyze_button.click()
-    assert analysis.badge.text() == "ANÁLISIS REAL"
-    assert analysis.badge.property("badge") == "real"
-    assert analysis.review_button.isHidden() is True
-    assert analysis.summary_button.isHidden() is False
-    assert analysis._registros_card.isHidden() is False
-    assert analysis._result_card.isHidden() is True
-
-
-def test_real_flow_goes_to_diagnostic_summary_without_exceptions(window, make_medinet):
-    window.navigate("new_report")
-    window.screens["new_report"].medinet_selector.set_selection(make_medinet(_demo_rows()))
-    window.screens["new_report"].analyze_button.click()
-
-    # análisis real -> resumen (sin pasar por 'exceptions')
-    window.screens["analysis"].summary_button.click()
-    summary = window.screens["summary"]
-    assert window.current_screen_name == "summary"
-    assert summary._real_registros_card.isHidden() is False
-    assert summary._analysis_card.isHidden() is True  # nada del mock
-    assert summary.generate_button.isEnabled() is False
-    assert "Microsoft Excel" in summary.generate_button.toolTip()
-    assert "no disponible" in summary._banner_line2.text().lower()
-
-    # "Volver" en modo real regresa a análisis, no a excepciones
-    summary.back_button.click()
-    assert window.current_screen_name == "analysis"
-
-
-def test_real_analysis_read_error_is_shown_not_crash(window, tmp_path):
-    bad = tmp_path / "roto.xlsx"
-    bad.write_text("no soy un xlsx", encoding="utf-8")
-    window.navigate("new_report")
-    window.screens["new_report"].medinet_selector.set_selection(bad)
-    window.screens["new_report"].analyze_button.click()
-
-    assert window.current_screen_name == "analysis"
-    assert window.state.analysis_mode == "REAL"
-    assert window.state.analysis_error
-    analysis = window.screens["analysis"]
-    assert analysis.error_label.isHidden() is False
-    assert analysis._validations_card.isHidden() is True
-
-
-def test_default_period_survives_new_report_screen(window):
-    # Entrar a 'Nuevo reporte' no debe pisar el año/mes por defecto del estado.
-    expected_month, expected_year = window.state.month, window.state.year
-    window.navigate("new_report")
-    window.screens["new_report"].demo_button.click()
-
-    assert (window.state.month, window.state.year) == (expected_month, expected_year)
-    assert window.state.analysis.period_label.endswith(str(expected_year))
-
-
-def test_analyze_button_requires_medinet_file(window, tmp_path):
-    window.navigate("new_report")
-    new_report = window.screens["new_report"]
-    assert new_report.analyze_button.isEnabled() is False
-
-    sample = tmp_path / "medinet.xlsx"
-    sample.write_bytes(b"not a real workbook")
-    new_report.medinet_selector.set_selection(sample)
-    assert new_report.analyze_button.isEnabled() is True
-
-
-# --- Componentes -------------------------------------------------------
-
-
-def test_file_selector_shows_name_and_size(window, tmp_path):
-    from remasep.ui.components.file_selector import FileSelector, human_size
-
-    sample = tmp_path / "medinet.xlsx"
-    sample.write_bytes(b"x" * 2048)
-
-    selector = FileSelector("Medinet", extensions=["xlsx", "csv"])
-    captured = []
-    selector.fileSelected.connect(lambda p: captured.append(p))
-    selector.set_selection(sample)
-
-    assert selector.path == sample
-    assert "medinet.xlsx" in selector._name_label.text()
-    assert human_size(2048) == "2,0 KB"
-    assert captured == [sample]
-
-    selector.clear()
-    assert selector.path is None
-
-
-def test_step_indicator_marks_current(window):
-    from remasep.ui.components.step_indicator import StepIndicator
-
-    steps = StepIndicator(["Archivos", "Análisis", "Revisión", "Resultado"])
-    steps.set_current(2)
-    assert steps.current == 2
-    assert steps._labels[1].objectName() == "stepDone"
-    assert steps._labels[2].objectName() == "stepActive"
-    assert steps._labels[3].objectName() == "stepInactive"
-
-
-# --- Flujo completo -------------------------------------------------
-
-
-def test_full_flow_home_to_summary(window):
-    # HOME -> NUEVO REPORTE
-    window.screens["home"].start_button.click()
-    new_report = window.screens["new_report"]
-    new_report.month_combo.setCurrentIndex(7)
-    new_report.year_spin.setValue(2026)
-
-    # -> ANÁLISIS (modo demo)
-    new_report.demo_button.click()
-    assert window.current_screen_name == "analysis"
-
-    # -> EXCEPCIONES
-    window.screens["analysis"].review_button.click()
-    exceptions = window.screens["exceptions"]
-    assert window.current_screen_name == "exceptions"
-    assert len(exceptions.rows) == 3
-    assert exceptions.continue_button.isEnabled() is False  # bloqueado por pendientes
-
-    # resolver: 2 excepciones a una categoría, 1 como "Ignorar justificadamente"
-    ignore_index = 1 + CLASSIFICATION_OPTIONS.index(IGNORE_OPTION)
-    exceptions.rows[0].combo.setCurrentIndex(1)
-    exceptions.rows[1].combo.setCurrentIndex(1)
-    exceptions.rows[2].combo.setCurrentIndex(ignore_index)
-    assert exceptions.continue_button.isEnabled() is True
-
-    # -> RESUMEN
-    exceptions.continue_button.click()
-    summary = window.screens["summary"]
-    assert window.current_screen_name == "summary"
-    assert "AGOSTO 2026" in summary.title_label.text()
-
-    # generación deshabilitada + tooltip
-    assert summary.generate_button.isEnabled() is False
-    assert "Microsoft Excel" in summary.generate_button.toolTip()
-
-    result = window.state.analysis
-    outcome = window.state.review_outcome()
-
-    # RESULTADO DEL ANÁLISIS: intacto, muestra las cifras originales.
-    assert _find_row(summary._analysis_layout, "Sin clasificar").value == format_int(
-        result.unclassified_records
-    )
-    assert _find_row(summary._analysis_layout, "Clasificadas").value == format_int(
-        result.classified_records
-    )
-
-    # ESTADO TRAS LA REVISIÓN: sin pendientes y sin registros sin clasificar.
-    assert _find_row(summary._review_layout, "Grupos pendientes de revisión").value == "0"
-    assert _find_row(summary._review_layout, "Sin clasificar").value == "0"
-    assert _find_row(summary._review_layout, "Clasificadas").value == format_int(
-        outcome.final_classified
-    )
-    assert _find_row(summary._review_layout, "Ignoradas").value == format_int(outcome.final_ignored)
-
-    # Invariante: total = final_classified + final_ignored + final_unclassified.
-    assert (
-        outcome.final_classified + outcome.final_ignored + outcome.final_unclassified
-        == result.total_records
-    )
-    # 2 grupos clasificados + 1 ignorado respecto de las cifras del análisis.
-    ignored_group_count = result.exceptions[2].count
-    assert outcome.final_ignored == result.ignored_records + ignored_group_count
-    assert outcome.final_classified == result.total_records - outcome.final_ignored
-
-    # -> HOME conservando período
-    summary.home_button.click()
-    assert window.current_screen_name == "home"
-    assert window.state.month == 8
-    assert window.state.year == 2026
-    assert window.state.analysis is None
-    assert window.state.demo is False
-
-
-def test_back_navigation(window):
-    window.navigate("new_report")
-    window.screens["new_report"].demo_button.click()
-    window.screens["analysis"].review_button.click()
-    assert window.current_screen_name == "exceptions"
-
-    window.screens["exceptions"].back_button.click()
-    assert window.current_screen_name == "analysis"
-
-    window.screens["analysis"].back_button.click()
+def test_dashboard_without_summary_returns_to_new_report(window):
+    window.state.summary = None
+    window.navigate("dashboard")
     assert window.current_screen_name == "new_report"
 
 
-def _find_row(layout, title: str):
-    for i in range(layout.count()):
-        widget = layout.itemAt(i).widget()
-        if widget is not None and getattr(widget, "title", None) == title:
-            return widget
-    raise AssertionError(f"fila {title!r} no encontrada")
+# ---------------------------------------------------------------------------
+# Generación
+# ---------------------------------------------------------------------------
+
+
+def test_generate_calls_the_generation_service(window, medinet_file, template_file, monkeypatch):
+    window.navigate("new_report")
+    _fill_new_report(window, medinet_file, template_file)
+    _run_analysis(window)
+
+    calls = {}
+
+    def fake_run_generation(medinet, period, template, output, **_kw):
+        calls["args"] = (Path(medinet).name, period, Path(template).name, output)
+        return GenerationOutcome(
+            ok=True, status="GENERATED_DRAFT", submission_label="NOT_FOR_SUBMISSION",
+            output_path="outputs/REMASEP_2026_07_DRAFT.xlsm", written_cells=1122,
+            considered_records=24, integrity_ok=True,
+            control_status="PASS_INTERNAL_VALIDATION", warnings=(),
+        )
+
+    monkeypatch.setattr("remasep.ui.workers.run_generation", fake_run_generation)
+    monkeypatch.setattr("remasep.ui.screens.generate.run_generation", fake_run_generation)
+    _run_generate(window)
+
+    assert calls["args"][0] == Path(medinet_file).name
+    assert calls["args"][1] == Period(7, 2026)
+    assert calls["args"][2] == Path(template_file).name
+
+    gen = window.screens["generate"]
+    assert gen._result_card.isVisible()
+    assert not gen._error.isVisible()
+    txt = _all_label_text(gen)
+    assert "REMASEP_2026_07_DRAFT.xlsm" in txt
+    assert "Correcta" in txt
+    assert "Julio 2026" in txt
+    assert "requerir información adicional" in txt  # aviso NOT_FOR_SUBMISSION
+
+
+def test_generate_backend_error_shows_human_message(window, medinet_file, template_file, monkeypatch):
+    window.navigate("new_report")
+    _fill_new_report(window, medinet_file, template_file)
+    _run_analysis(window)
+
+    def failing(*_a, **_kw):
+        return GenerationOutcome(
+            ok=False, status="EXCEL_UNAVAILABLE", submission_label="",
+            output_path=None, written_cells=0, considered_records=24,
+            integrity_ok=False, control_status="", warnings=(),
+            human_error=HumanError(
+                "Microsoft Excel Desktop es necesario para generar el informe.",
+                "Requiere Windows con Excel de escritorio.", "Volver",
+            ),
+        )
+
+    monkeypatch.setattr("remasep.ui.workers.run_generation", failing)
+    monkeypatch.setattr("remasep.ui.screens.generate.run_generation", failing)
+    _run_generate(window)
+
+    gen = window.screens["generate"]
+    assert not gen._result_card.isVisible()
+    assert gen._error.isVisible()
+    assert "Microsoft Excel" in gen._error._title.text()
+    assert "Traceback" not in gen._error._detail.text()
+    assert window.state.generation is not None and window.state.generation.ok is False
+
+
+def test_run_generation_is_graceful_without_excel(medinet_file):
+    """En Linux / sin Excel: no lanza; devuelve ok=False + mensaje humano."""
+    from remasep.ui.workers import run_generation
+
+    outcome = run_generation(medinet_file, Period(7, 2026), "x.xlsm", None)
+    assert outcome.ok is False
+    assert outcome.status == "EXCEL_UNAVAILABLE"
+    assert outcome.human_error is not None
+    assert "Excel" in outcome.human_error.title
+
+
+# ---------------------------------------------------------------------------
+# reset_flow
+# ---------------------------------------------------------------------------
+
+
+def test_reset_flow_returns_home_and_clears_selectors(window, medinet_file, template_file):
+    window.navigate("new_report")
+    _fill_new_report(window, medinet_file, template_file)
+    window.reset_flow()
+
+    assert window.current_screen_name == "home"
+    nr = window.screens["new_report"]
+    assert nr.medinet_selector.path is None
+    assert nr.template_selector.path is None
+    assert window.state.summary is None
+    # conserva el período elegido
+    assert (window.state.month, window.state.year) == (7, 2026)
+
+
+# ---------------------------------------------------------------------------
+# Escenario real Julio 2026 (gated)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.skipif(not _MEDINET_REAL.is_file(), reason="requiere data/local de desarrollo")
+def test_real_july_flow_dashboard_matches_pipeline(window, template_file):
+    window.navigate("new_report")
+    _fill_new_report(window, _MEDINET_REAL, template_file)
+    _run_analysis(window)
+
+    s = window.state.summary
+    assert (s.period_scope_records, s.included_records, s.excluded_records) == (2114, 1364, 750)
+    db = window.screens["dashboard"]
+    assert db.kpi_period._value.text() == "2.114"
+    assert db.kpi_included._value.text() == "1.364"
