@@ -1,14 +1,37 @@
-# Auditoría del campo ESTADO — Medinet Julio 2026 (Sprint 3.9, fase 1)
+# Campo ESTADO — Medinet (Sprint 3.9) — **CONFIRMED / CLOSED**
 
-`scripts/audit_medinet_estado.py` — **sólo lectura**. No modifica lógica, no
-implementa ningún filtro por ESTADO. Evidencia para confirmar con el cliente qué
-estados de Medinet deben contarse en el REMASEP.
+## Estado
+
+- **Fase 1** (auditoría, sólo lectura): evidencia recogida — ver abajo.
+- **Fase 2** (regla confirmada e implementada):
+  - **Confirmación funcional del cliente** (Fundación Gantz / Jacqueline): para el
+    REMASEP se cuentan **sólo** las citas cuyo ESTADO sea
+    **`Atendido` · `En Sala de Espera` · `Atención Pausada` · `En Atención`**; se
+    excluyen `Cancelado` · `No Se Presenta` · `Agendado` · `Confirmado` ·
+    `Re-Agendado`.
+  - Regla **versionada** en `config/runtime_2026/estado_filter.yaml`
+    (`status: CONFIRMED`), aplicada en `production_pipeline.apply_estado_filter`
+    después de "válidos ∩ período" y antes de calcular MetricValues.
+  - `estado_filter_status` del runtime bundle = **`CONFIRMED`**.
+  - Julio 2026: `processing_scope_records` **2 114 → 1 364**; el resultado es
+    idéntico al escenario `LEGACY_STATE_HYPOTHESIS` auditado en fase 1
+    (1 122 MetricValues, 1 122 PendingWrites, 187 no-cero, Σ = 928).
+
+> El `estado_filter_status` del **Sprint 3.6** (`writable_target_mapping`) queda
+> en `PENDING_FUNCTIONAL_CONFIRMATION` a propósito: describe otra capa (qué celdas
+> son *destino* de escritura, que no depende del ESTADO), no la selección de
+> población.
+
+---
+
+## Fase 1 — auditoría (sólo lectura)
+
+`scripts/audit_medinet_estado.py`. Evidencia que se llevó al cliente.
 
 - Medinet: `data/local/detalle_citas - 2026-09-07T123630.940.xlsx`
 - Período: Julio 2026, recortado **exactamente** como
   `production_pipeline` (`processing_scope_frame` = registros estructuralmente
   válidos ∩ mes/año).
-- `estado_filter_status = PENDING_FUNCTIONAL_CONFIRMATION` (sin cambios).
 
 ## 1. Distribución por ESTADO
 
@@ -99,19 +122,26 @@ período"* vs *"contar sólo atenciones realizadas / con presencia del paciente"
 (≈ 750 registros, 516 conteos). Que el criterio sea exactamente los 4 estados de
 la hipótesis o sólo `Atendido` casi no mueve la aguja (5 métricas, 10 conteos).
 
-## 5. Lectura (sin concluir cuál es la regla correcta)
+## 5. Lectura (fase 1)
 
 - El export directo cuenta **toda cita agendada del período**, con cualquier
   ESTADO. Si el REMASEP debe reflejar **actividad efectivamente realizada**, las
   citas `Cancelado` (545) y `No Se Presenta` (182) inflarían los conteos.
-- La hipótesis legacy **incluye** estados que no son "atención terminada"
-  (`En Sala de Espera`, `Atención Pausada`, `En Atención`) y **excluye**
-  `Agendado` / `Confirmado` / `Re-Agendado`. Ese criterio exacto es lo que falta
-  confirmar.
-- **No** se asume que la hipótesis sea la regla correcta. No se implementa ningún
-  filtro en esta fase.
+- La hipótesis legacy incluía estados que no son "atención terminada" y excluía
+  `Agendado` / `Confirmado` / `Re-Agendado`.
 
-## 6. Pregunta propuesta para Jacqueline
+## 6. Respuesta del cliente (cierre — fase 2)
+
+> **Confirmado (Fundación Gantz / Jacqueline)**: para el REMASEP se consideran
+> únicamente los registros cuyo ESTADO sea **`Atendido`**, **`En Sala de
+> Espera`**, **`Atención Pausada`** o **`En Atención`**. Se excluyen `Cancelado`,
+> `No Se Presenta`, `Agendado`, `Confirmado` y `Re-Agendado`.
+
+Coincide exactamente con la hipótesis legacy → Julio 2026 pasa de 2 114 a
+**1 364** registros. Regla implementada y versionada (fase 2, ver *Estado*
+arriba).
+
+Pregunta original que se llevó al cliente (para registro):
 
 > En el export de Medinet ("Detalle de citas"), cada cita del mes trae un campo
 > **ESTADO**. Para julio 2026 hay **2 114** citas en total:
@@ -131,9 +161,22 @@ la hipótesis o sólo `Atendido` casi no mueve la aguja (5 métricas, 10 conteos
 
 ## 7. Reproducir
 
+Auditoría (fase 1):
+
     python scripts/audit_medinet_estado.py \
         --medinet "data/local/detalle_citas - 2026-09-07T123630.940.xlsx" \
         --period 2026-07
 
-Escribe `artifacts/medinet_estado_audit/` (gitignored):
-`summary.json`, `estado_distribution.csv`, `changed_metrics.csv`.
+Regenerar los assets de runtime con la regla ESTADO confirmada (fase 2):
+
+    python scripts/build_runtime_assets.py
+
+Comprobación en producción:
+
+    python -c "from remasep.services.common import Period; \
+from remasep.services.production_pipeline import build_production_pending_writes as b; \
+r=b('data/local/detalle_citas - 2026-09-07T123630.940.xlsx', Period(7,2026)); \
+print(r.scope.period_scope_records, '->', r.scope.processing_scope_records, \
+len(r.run.metric_values), sum(1 for x in r.run.metric_values if x.value), \
+sum(x.value for x in r.run.metric_values))"
+    # 2114 -> 1364 1122 187 928

@@ -227,16 +227,25 @@ alineación semántica con la plantilla oficial). Para el detalle por sprint ver
   instruction_id / target_sheet-cell que el path validado (scope 2114, sin
   filtro ESTADO — que sigue `PENDING_FUNCTIONAL_CONFIRMATION`). Ver
   [`docs/RUNTIME_DECOUPLING.md`](RUNTIME_DECOUPLING.md).
-- **3.9 — Medinet Functional Validation (fase 1: auditoría ESTADO): ✅ COMPLETE.**
-  Sólo lectura, sin cambios de lógica ni filtros. `scripts/audit_medinet_estado.py`:
-  distribución de los 2 114 registros de julio por ESTADO (1 337 `Atendido`,
-  545 `Cancelado`, 182 `No Se Presenta`, 50 el resto); la hipótesis legacy
-  (`Atendido`/`Atención Pausada`/`En Sala de Espera`/`En Atención`) da
-  **exactamente 1 364**; aplicarla cambiaría **122 de 1 122** celdas
-  (Σ = 516 atenciones, todas a la baja; 23 pasan de >0 a 0). Pregunta para el
-  cliente en [`docs/MEDINET_ESTADO_AUDIT.md`](MEDINET_ESTADO_AUDIT.md) §6. Sin
-  implementar ningún filtro — `estado_filter_status` sigue
-  `PENDING_FUNCTIONAL_CONFIRMATION`.
+- **3.9 — Medinet Functional Validation (ESTADO): ✅ COMPLETE / CLOSED.**
+  - *Fase 1 (auditoría, sólo lectura)*: `scripts/audit_medinet_estado.py` —
+    distribución de los 2 114 registros de julio por ESTADO (1 337 `Atendido`,
+    545 `Cancelado`, 182 `No Se Presenta`, 50 el resto); la hipótesis legacy da
+    **exactamente 1 364**; impacto de **122 de 1 122** celdas (Σ = 516).
+  - *Fase 2 (regla confirmada e implementada)*: el cliente (Fundación Gantz /
+    Jacqueline) confirmó contar sólo `Atendido` · `En Sala de Espera` ·
+    `Atención Pausada` · `En Atención` (excluir `Cancelado` · `No Se Presenta` ·
+    `Agendado` · `Confirmado` · `Re-Agendado`). Regla **versionada** en
+    `config/runtime_2026/estado_filter.yaml` (`status: CONFIRMED`, sha256 en
+    `bundle.yaml`), aplicada en `production_pipeline.apply_estado_filter` tras
+    "válidos ∩ período" y antes de calcular MetricValues. Normalización
+    `str.strip().casefold()` (sin aliases). Julio 2026:
+    `processing_scope_records` **2 114 → 1 364**; producción reproduce **exacto**
+    el escenario `LEGACY_STATE_HYPOTHESIS` de la fase 1 (1 122
+    MetricValues/PendingWrites, **187 no-cero**, **Σ = 928**). `estado_filter_status`
+    del runtime bundle = **`CONFIRMED`**. (El del Sprint 3.6 sigue
+    `PENDING_FUNCTIONAL_CONFIRMATION` a propósito: otra capa.) Ver
+    [`docs/MEDINET_ESTADO_AUDIT.md`](MEDINET_ESTADO_AUDIT.md).
 - **3.7+ — dimensiones de actividad / especialidad** y traducción a la tabla
   larga semántica: **pendiente**.
 - **Modelo de *provenance* / `source`**: `MEDINET` se aplica en 3.1–3.3; el delta

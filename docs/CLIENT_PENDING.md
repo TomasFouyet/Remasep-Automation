@@ -85,6 +85,31 @@ puede solicitarla a **Paulo**. Sigue **pendiente** obtener el export Medinet
 exacto usado para julio 2026 (hasta ahora se usó la hoja `Atenciones` del
 generador como sustituto).
 
+### I. `ESTADO` de Medinet — qué estados se cuentan (RESUELTO, Sprint 3.9)
+
+**Confirmado por Fundación Gantz / Jacqueline**: para el REMASEP se consideran
+**únicamente** los registros cuyo ESTADO sea:
+
+- `Atendido`
+- `En Sala de Espera`
+- `Atención Pausada`
+- `En Atención`
+
+Se **excluyen**: `Cancelado`, `No Se Presenta`, `Agendado`, `Confirmado`,
+`Re-Agendado`.
+
+Implementado (Sprint 3.9 fase 2): la regla vive versionada en
+`config/runtime_2026/estado_filter.yaml` (`status: CONFIRMED`) y la aplica
+`production_pipeline` tras "válidos ∩ período" y antes de calcular MetricValues.
+Julio 2026: `processing_scope_records` **2 114 → 1 364**; coincide exacto con la
+auditoría de la fase 1 (1 122 MetricValues/PendingWrites, 187 no-cero, Σ = 928).
+Evidencia y respuesta del cliente:
+[`docs/MEDINET_ESTADO_AUDIT.md`](MEDINET_ESTADO_AUDIT.md).
+
+> El `estado_filter_status` del Sprint 3.6 (`writable_target_mapping`) queda en
+> `PENDING_FUNCTIONAL_CONFIRMATION` a propósito: es otra capa (celdas *destino*
+> de escritura, que no dependen del ESTADO).
+
 ---
 
 ## PENDIENTES
@@ -133,19 +158,7 @@ generador como sustituto).
 
 - Confirmar `SUCURSAL` → presencial / telemedicina (hoy `AC = TIPO_DE_CITA +
   SUCURSAL`).
-- **`ESTADO` — ¿qué estados se cuentan como "atención realizada"?**
-  Evidencia recogida en el Sprint 3.9
-  ([`docs/MEDINET_ESTADO_AUDIT.md`](MEDINET_ESTADO_AUDIT.md)): el export directo
-  de julio 2026 trae **2 114** citas — 1 337 `Atendido`, 545 `Cancelado`,
-  182 `No Se Presenta`, 50 en el resto de estados. La hipótesis legacy observada
-  (incluir `Atendido` / `Atención Pausada` / `En Sala de Espera` / `En Atención`;
-  excluir `Cancelado` / `No Se Presenta` / `Agendado` / `Confirmado` /
-  `Re-Agendado`) reproduce **exactamente 1 364** registros. Aplicarla cambiaría
-  el valor de **122 de 1 122 celdas** del REMASEP (Σ = 516 atenciones;
-  principalmente fonoaudiología / kinesiología / psicología y controles de
-  ortodoncia). **Pregunta concreta para Jacqueline en
-  `docs/MEDINET_ESTADO_AUDIT.md §6`.** No se implementa ningún filtro hasta
-  confirmar (`estado_filter_status = PENDING_FUNCTIONAL_CONFIRMATION`).
+- ✅ **`ESTADO` — RESUELTO** (ver sección *RESUELTAS · I*).
 - Comportamiento esperado de **`PRESTACION`** (puede venir vacía; hoy es
   diagnóstico informativo, no error).
 - **`MODALIDAD`**: contiene previsión / tramo (`Fonasa A/B/C/D`, `GES …`,

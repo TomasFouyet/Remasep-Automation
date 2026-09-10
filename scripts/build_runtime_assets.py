@@ -36,13 +36,27 @@ from close_legacy_aggregations import KIND_BASE, KIND_DERIVED, close_legacy_aggr
 from compare_legacy_aggregations import _make_resolver
 
 from remasep.core.errors import RemasepError
+from remasep.services.medinet_input_reconciliation import (
+    LEGACY_EXCLUDED_STATES,
+    LEGACY_KEPT_STATES,
+)
 
 DEFAULT_GENERATOR = "data/local/GENERACION DATOS REMASEP.xlsx"
 DEFAULT_MANIFEST = "artifacts/writable_target_mapping/write_manifest_ready.csv"
 DEFAULT_ZERO_POLICY = "config/metric_value_producer_2026/zero_write_policy.yaml"
 DEFAULT_OUT = "config/runtime_2026"
 
-ESTADO_FILTER_STATUS = "PENDING_FUNCTIONAL_CONFIRMATION"
+# Sprint 3.9 fase 2 — regla ESTADO CONFIRMADA por el responsable funcional
+# (Fundación Gantz / Jacqueline). Coincide con los estados observados del
+# proceso legacy (`LEGACY_KEPT_STATES`); se cruza contra ese constante para
+# detectar desalineación en tiempo de build.
+ESTADO_FILTER_STATUS = "CONFIRMED"
+ESTADO_INCLUDED_STATES = (
+    "Atendido", "En Sala de Espera", "Atención Pausada", "En Atención",
+)
+ESTADO_EXCLUDED_STATES = (
+    "Cancelado", "No Se Presenta", "Agendado", "Confirmado", "Re-Agendado",
+)
 
 _MANIFEST_COLUMNS = (
     "instruction_id", "source_metric_id", "source_semantic_signature",
@@ -200,7 +214,40 @@ def build(generator: Path, manifest: Path, zero_policy: Path, out_dir: Path) -> 
         encoding="utf-8",
     )
 
-    pii = _scan_pii([manifest_out, catalog_out, detail_out, zero_out])
+    # --- regla ESTADO confirmada (Sprint 3.9 fase 2) ---------------
+    if set(ESTADO_INCLUDED_STATES) != set(LEGACY_KEPT_STATES) or set(
+        ESTADO_EXCLUDED_STATES
+    ) != set(LEGACY_EXCLUDED_STATES):
+        raise RemasepError(
+            "la regla ESTADO confirmada no coincide con LEGACY_KEPT/EXCLUDED_STATES"
+        )
+    estado_out = out_dir / "estado_filter.yaml"
+    estado_out.write_text(
+        "# Sprint 3.9 fase 2 — regla funcional del campo ESTADO de Medinet.\n"
+        "# CONFIRMADA por el responsable funcional (Fundación Gantz / Jacqueline).\n"
+        "# NO editar a mano; regenerar con scripts/build_runtime_assets.py.\n"
+        "# Normalización: str.strip().casefold() (espacios externos + minúsculas, con tildes).\n"
+        + yaml.safe_dump(
+            {
+                "version": "runtime_2026",
+                "status": ESTADO_FILTER_STATUS,
+                "confirmed_source": "Fundación Gantz / Jacqueline — Sprint 3.9 fase 2",
+                "normalization": "strip_casefold",
+                "included_states": list(ESTADO_INCLUDED_STATES),
+                "excluded_states": list(ESTADO_EXCLUDED_STATES),
+                "audit": {
+                    "period": "Julio 2026",
+                    "scope_before": 2114,
+                    "scope_after": 1364,
+                    "reference": "docs/MEDINET_ESTADO_AUDIT.md",
+                },
+            },
+            allow_unicode=True, sort_keys=False,
+        ),
+        encoding="utf-8",
+    )
+
+    pii = _scan_pii([manifest_out, catalog_out, detail_out, zero_out, estado_out])
     if pii:
         for h in pii:
             print(f"PII SOSPECHOSA: {h}", file=sys.stderr)
@@ -211,10 +258,11 @@ def build(generator: Path, manifest: Path, zero_policy: Path, out_dir: Path) -> 
         "metric_catalog.csv": _sha256(catalog_out),
         "detail_contract.yaml": _sha256(detail_out),
         "zero_policy.yaml": _sha256(zero_out),
+        "estado_filter.yaml": _sha256(estado_out),
     }
     bundle = {
         "version": "runtime_2026",
-        "generated_by": "scripts/build_runtime_assets.py (Sprint 3.8)",
+        "generated_by": "scripts/build_runtime_assets.py (Sprint 3.8 + 3.9 fase 2)",
         "template_fingerprint_id": fingerprint,
         "expected_instruction_count": len(manifest_rows),
         "detail_sheet": detail_contract["detail_sheet"],
@@ -224,6 +272,7 @@ def build(generator: Path, manifest: Path, zero_policy: Path, out_dir: Path) -> 
         "metric_catalog": "metric_catalog.csv",
         "detail_contract": "detail_contract.yaml",
         "zero_policy": "zero_policy.yaml",
+        "estado_filter": "estado_filter.yaml",
         "assets": assets,
         "notes": (
             "Assets versionados con la app. GENERACION DATOS REMASEP.xlsx NO forma "
@@ -242,13 +291,17 @@ def build(generator: Path, manifest: Path, zero_policy: Path, out_dir: Path) -> 
         "catalog_rows": len(catalog_rows),
         "criterion_refs": len(detail_contract["criterion_refs"]),
         "zero_write_policy": resolution,
+        "estado_filter_status": ESTADO_FILTER_STATUS,
+        "estado_included_states": list(ESTADO_INCLUDED_STATES),
     }
 
 
 def _self_check(out_dir: Path, generator: Path, manifest: Path) -> dict:
-    """Verifica que los assets congelados reproducen exactamente los PendingWrites
-    del path validado (OLD: legacy workbook)."""
+    """Verifica que los assets reproducen exactamente los PendingWrites del path
+    validado. Desde 3.9 fase 2 producción aplica el filtro ESTADO CONFIRMADO, así
+    que el lado OLD también se filtra a los estados confirmados."""
     from build_metric_values import (
+        _diagnostic_frame,
         build_legacy_reference,
         load_manifest,
         run_producer,
@@ -265,11 +318,13 @@ def _self_check(out_dir: Path, generator: Path, manifest: Path) -> dict:
         return {"skipped": "no hay export Medinet local para comparar"}
     period = Period(7, 2026)
 
-    # OLD path
+    # OLD path (con el filtro ESTADO confirmado aplicado igual que producción)
     reference = build_legacy_reference(generator)
     old_manifest = load_manifest(manifest)
-    old_frame = processing_scope_frame(medinet, period)
-    old_run = run_producer(old_frame, reference, old_manifest, period, mode="PRODUCTION_PERIOD_SCOPE")
+    old_frame = _diagnostic_frame(processing_scope_frame(medinet, period), ESTADO_INCLUDED_STATES)
+    old_run = run_producer(
+        old_frame, reference, old_manifest, period, mode="LEGACY_EQUIVALENCE_DIAGNOSTIC"
+    )
     old_pending = join_metric_values_with_manifest(old_run.metric_values, old_manifest)
 
     # NEW path

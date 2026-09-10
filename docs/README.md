@@ -25,11 +25,12 @@
   = export directo Medinet "Detalle de citas"; `GENERACION DATOS REMASEP.xlsx` es
   sólo referencia legacy. Alcance de período (`processing_scope_records`) y
   reconciliación privacy-safe 2114 vs 1364 (hipótesis de ESTADO, no regla).
-- [`MEDINET_ESTADO_AUDIT.md`](MEDINET_ESTADO_AUDIT.md) — Sprint 3.9 (fase 1):
-  auditoría sólo-lectura del campo `ESTADO` (distribución de las 2 114 citas de
-  julio, confirmación de los 1 364 de la hipótesis legacy, impacto de 122/1 122
-  celdas / 516 atenciones) y pregunta concreta para el cliente. **No** se
-  implementa filtro.
+- [`MEDINET_ESTADO_AUDIT.md`](MEDINET_ESTADO_AUDIT.md) — Sprint 3.9: auditoría
+  del campo `ESTADO` (fase 1) + **regla confirmada e implementada** (fase 2). El
+  cliente confirmó contar sólo `Atendido` · `En Sala de Espera` · `Atención
+  Pausada` · `En Atención`; regla versionada en
+  `config/runtime_2026/estado_filter.yaml` (`CONFIRMED`) y aplicada en
+  `production_pipeline`. Julio 2026: `processing_scope_records` 2 114 → **1 364**.
 - [`TECHNICAL_OVERVIEW.md`](TECHNICAL_OVERVIEW.md) → *Fuentes de datos* —
   MEDINET · EGRESOS · TABLA QUIRÚRGICA / RESOURCE CALCULATION · OFFICIAL TEMPLATE.
 - [`TECHNICAL_OVERVIEW.md`](TECHNICAL_OVERVIEW.md) → *Modelo futuro de métricas* —

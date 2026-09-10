@@ -1,0 +1,24 @@
+# Sprint 3.9 fase 2 — regla funcional del campo ESTADO de Medinet.
+# CONFIRMADA por el responsable funcional (Fundación Gantz / Jacqueline).
+# NO editar a mano; regenerar con scripts/build_runtime_assets.py.
+# Normalización: str.strip().casefold() (espacios externos + minúsculas, con tildes).
+version: runtime_2026
+status: CONFIRMED
+confirmed_source: Fundación Gantz / Jacqueline — Sprint 3.9 fase 2
+normalization: strip_casefold
+included_states:
+- Atendido
+- En Sala de Espera
+- Atención Pausada
+- En Atención
+excluded_states:
+- Cancelado
+- No Se Presenta
+- Agendado
+- Confirmado
+- Re-Agendado
+audit:
+  period: Julio 2026
+  scope_before: 2114
+  scope_after: 1364
+  reference: docs/MEDINET_ESTADO_AUDIT.md
