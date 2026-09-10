@@ -133,8 +133,19 @@ generador como sustituto).
 
 - Confirmar `SUCURSAL` → presencial / telemedicina (hoy `AC = TIPO_DE_CITA +
   SUCURSAL`).
-- Significado funcional de **`ESTADO`** (`Atendido`, `Atención Pausada`,
-  `En Sala de Espera`, `En Atención`): ¿filtrar por estado antes de contar?
+- **`ESTADO` — ¿qué estados se cuentan como "atención realizada"?**
+  Evidencia recogida en el Sprint 3.9
+  ([`docs/MEDINET_ESTADO_AUDIT.md`](MEDINET_ESTADO_AUDIT.md)): el export directo
+  de julio 2026 trae **2 114** citas — 1 337 `Atendido`, 545 `Cancelado`,
+  182 `No Se Presenta`, 50 en el resto de estados. La hipótesis legacy observada
+  (incluir `Atendido` / `Atención Pausada` / `En Sala de Espera` / `En Atención`;
+  excluir `Cancelado` / `No Se Presenta` / `Agendado` / `Confirmado` /
+  `Re-Agendado`) reproduce **exactamente 1 364** registros. Aplicarla cambiaría
+  el valor de **122 de 1 122 celdas** del REMASEP (Σ = 516 atenciones;
+  principalmente fonoaudiología / kinesiología / psicología y controles de
+  ortodoncia). **Pregunta concreta para Jacqueline en
+  `docs/MEDINET_ESTADO_AUDIT.md §6`.** No se implementa ningún filtro hasta
+  confirmar (`estado_filter_status = PENDING_FUNCTIONAL_CONFIRMATION`).
 - Comportamiento esperado de **`PRESTACION`** (puede venir vacía; hoy es
   diagnóstico informativo, no error).
 - **`MODALIDAD`**: contiene previsión / tramo (`Fonasa A/B/C/D`, `GES …`,
