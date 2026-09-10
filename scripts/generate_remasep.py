@@ -1,0 +1,192 @@
+"""Sprint 3.7B — CLI de generación del REMASEP con Microsoft Excel Desktop (COM).
+
+Construye los ``PendingWrite`` con el motor del Sprint 3.7A y los escribe en una
+COPIA de la plantilla oficial vía Excel COM (Windows). En Linux/WSL no intenta
+COM: informa que se necesita Microsoft Excel Desktop y termina con código de
+salida controlado.
+
+Uso:
+
+    python scripts/generate_remasep.py \\
+        --medinet "data/local/detalle_citas - 2026-09-07T123630.940.xlsx" \\
+        --period 2026-07 \\
+        --template "data/local/REMASEP_V1.4 Julio 2026.xlsm" \\
+        --output outputs/REMASEP_2026_07_DRAFT.xlsm \\
+        --mode diagnostic
+"""
+
+from __future__ import annotations
+
+import argparse
+import csv
+import sys
+from pathlib import Path
+
+import yaml
+from build_metric_values import (
+    DEFAULT_GENERATOR,
+    DEFAULT_MANIFEST,
+    _diagnostic_frame,
+    _parse_period,
+    build_legacy_reference,
+    load_manifest,
+    run_producer,
+)
+
+from remasep.core.errors import RemasepError
+from remasep.services.excel_writer import (
+    MODE_DIAGNOSTIC_REFERENCE,
+    MODE_PRODUCTION,
+    STATUS_EXCEL_UNAVAILABLE,
+)
+from remasep.services.generation_service import GenerationService
+from remasep.services.medinet_analysis import processing_scope_frame
+from remasep.services.medinet_input_reconciliation import LEGACY_KEPT_STATES
+from remasep.services.metric_value_producer import (
+    MODE_DIAGNOSTIC as PRODUCER_MODE_DIAGNOSTIC,
+)
+from remasep.services.metric_value_producer import (
+    MODE_PRODUCTION as PRODUCER_MODE_PRODUCTION,
+)
+from remasep.services.metric_value_producer import (
+    join_metric_values_with_manifest,
+)
+
+DEFAULT_TEMPLATE = "data/local/REMASEP_V1.4 Julio 2026.xlsm"
+DEFAULT_MEDINET = "data/local/detalle_citas - 2026-09-07T123630.940.xlsx"
+ZERO_POLICY_CONFIG = "config/metric_value_producer_2026/zero_write_policy.yaml"
+
+_MODE_ALIASES = {
+    "diagnostic": MODE_DIAGNOSTIC_REFERENCE,
+    "diagnostic_reference": MODE_DIAGNOSTIC_REFERENCE,
+    "production": MODE_PRODUCTION,
+}
+_PRODUCER_MODE = {
+    MODE_DIAGNOSTIC_REFERENCE: PRODUCER_MODE_DIAGNOSTIC,
+    MODE_PRODUCTION: PRODUCER_MODE_PRODUCTION,
+}
+
+
+def _zero_write_policy() -> str:
+    path = Path(ZERO_POLICY_CONFIG)
+    if not path.is_file():
+        return "UNRESOLVED"
+    doc = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    return str(doc.get("resolution", "UNRESOLVED"))
+
+
+def _manifest_fingerprint(manifest_path: Path) -> str:
+    with manifest_path.open(encoding="utf-8", newline="") as fh:
+        ids = {row["template_fingerprint_id"] for row in csv.DictReader(fh)}
+    if len(ids) != 1:
+        raise RemasepError(
+            f"el manifiesto tiene {len(ids)} template_fingerprint_id distintos; se esperaba 1"
+        )
+    return ids.pop()
+
+
+def build_pending_writes(args, writer_mode: str):
+    period = _parse_period(args.period)
+    reference = build_legacy_reference(args.generator)
+    manifest = load_manifest(Path(args.manifest))
+    frame = processing_scope_frame(args.medinet, period)
+    if writer_mode == MODE_DIAGNOSTIC_REFERENCE:
+        frame = _diagnostic_frame(frame, LEGACY_KEPT_STATES)
+    run = run_producer(
+        frame, reference, manifest, period, mode=_PRODUCER_MODE[writer_mode]
+    )
+    pending = join_metric_values_with_manifest(run.metric_values, manifest)
+    return period, manifest, run, pending
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="generate_remasep.py",
+        description=(
+            "Genera el REMASEP escribiendo PendingWrite (Sprint 3.7A) en una copia "
+            "de la plantilla con Microsoft Excel Desktop. Requiere Windows + Excel."
+        ),
+    )
+    parser.add_argument("--medinet", default=DEFAULT_MEDINET)
+    parser.add_argument("--period", default="2026-07", help="AAAA-MM")
+    parser.add_argument("--template", default=DEFAULT_TEMPLATE)
+    parser.add_argument("--generator", default=DEFAULT_GENERATOR)
+    parser.add_argument("--manifest", default=DEFAULT_MANIFEST)
+    parser.add_argument("--output", default=None, help="ruta .xlsm de salida (outputs/...)")
+    parser.add_argument(
+        "--mode", choices=sorted(_MODE_ALIASES), default="diagnostic",
+    )
+    parser.add_argument("--artifacts", default="artifacts/excel_writer")
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    writer_mode = _MODE_ALIASES[args.mode]
+    service = GenerationService(artifacts_dir=Path(args.artifacts))
+
+    capability = service.capability(probe_com=True)
+    print(f"plataforma: {capability.platform}  can_generate: {capability.can_generate}")
+    if not capability.can_generate:
+        print(capability.user_message)
+        print(f"  motivo: {capability.reason}")
+        print(f"  detalle: {', '.join(capability.details) or 'n/a'}")
+        print(
+            "\nPara la prueba real: ejecutar este mismo comando en Windows con "
+            "Python + pywin32 + Microsoft Excel Desktop instalados."
+        )
+        return 3
+
+    try:
+        period, manifest, run, pending = build_pending_writes(args, writer_mode)
+    except RemasepError as exc:
+        print(f"ERROR construyendo PendingWrite: {exc}", file=sys.stderr)
+        return 2
+
+    if run.value_type_conflicts or run.unsupported:
+        print(
+            f"ERROR: {len(run.value_type_conflicts)} conflicto(s) de tipo, "
+            f"{len(run.unsupported)} sin soporte — se aborta antes de escribir.",
+            file=sys.stderr,
+        )
+        return 2
+
+    manifest_ids = [row.instruction_id for row in manifest]
+    try:
+        sr = service.generate(
+            mode=writer_mode,
+            template_path=args.template,
+            output_path=args.output,
+            pending_writes=pending,
+            manifest_instruction_ids=manifest_ids,
+            period_year=period.year,
+            period_month=period.month,
+            zero_write_policy=_zero_write_policy(),
+            expected_fingerprint_id=_manifest_fingerprint(Path(args.manifest)),
+        )
+    except RemasepError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 2
+
+    r = sr.result
+    print(f"\nestado: {r.status}  ({sr.submission_label})")
+    print(f"  writer_integrity_status: {r.writer_integrity_status}")
+    print(f"  control_status: {r.control_status}")
+    print(f"  celdas escritas y verificadas: {r.written_cells} / {len(pending)}")
+    print(f"  plantilla intacta: {r.template_unchanged}")
+    if r.output_path:
+        print(f"  salida: {r.output_path}")
+    for w in r.warnings:
+        print(f"  aviso: {w}")
+    for e in r.errors:
+        print(f"  error: {e}")
+    if sr.artifact_files:
+        print(f"artefactos en {sr.artifacts_dir}: {', '.join(sr.artifact_files)}")
+
+    if r.status == STATUS_EXCEL_UNAVAILABLE:
+        return 3
+    return 0 if r.succeeded else 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
