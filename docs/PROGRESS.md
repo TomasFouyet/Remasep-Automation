@@ -14,7 +14,7 @@ alineación semántica con la plantilla oficial). Para el detalle por sprint ver
 | **3 — Semantic Metrics** | Inventario semántico (3.1 ✅), mapeo de dimensiones sexo/edad/alcance/código (3.2 ✅), readiness técnica + cola de revisión (3.3 ✅), delta del REMASEP final + provenance de fuente (3.4 ✅), alineación semántica con la plantilla oficial (3.5 ✅), writable target mapping (3.6 ✅), metric value producer + equivalencia de valores (3.7A ✅) | **IN PROGRESS** |
 | **4 — Additional Sources / Complete Dataset** | Adaptador de egresos, cálculo de recursos, dataset golden | PENDING |
 | **5 — Official Template Mapping** | Mapping semántico generador/Medinet → plantilla MINSAL (alineación de candidatos hecha en 3.5; escritura Excel pendiente) | PENDING |
-| **6 — Excel Generation / CONTROL** | Escritura vía Excel COM (Windows), recálculo, verificación `CONTROL` | PENDING |
+| **6 — Excel Generation / CONTROL** | Escritura vía Excel COM (Windows), recálculo, verificación `CONTROL` | **IN PROGRESS** (3.7B: writer + verificación implementados; falta corrida real en Windows) |
 | **7 — Pilot / Packaging** | Piloto manual + automático en paralelo, empaquetado `.exe` | PENDING |
 
 ## Completado
@@ -167,8 +167,37 @@ alineación semántica con la plantilla oficial). Para el detalle por sprint ver
   `estado_filter_status = PENDING_FUNCTIONAL_CONFIRMATION` (el modo productivo no
   lo aplica; el diagnóstico no lo promueve a regla). Ver
   [`docs/METRIC_VALUE_PRODUCER.md`](METRIC_VALUE_PRODUCER.md).
-- **3.7+ — Excel writer**: escritura vía COM + verificación `CONTROL`.
-  **Pendiente.**
+- **3.7B — Safe Excel COM Writer & Generated Workbook Verification: ✅ COMPLETE
+  (código; falta la corrida real en Windows).** Escribe los `PendingWrite` del
+  3.7A en una **copia** del REMASEP oficial con Microsoft Excel Desktop (COM,
+  sólo Windows). Núcleo independiente de plataforma
+  (`services/excel_writer.py`: `WorkbookWriter` Protocol, preflight, snapshot,
+  verificación) + `adapters/excel_com.py` (`ExcelComWorkbookWriter`,
+  `win32com` perezoso) + `FakeWorkbookWriter` (tests) + `ExcelCapability`
+  (en WSL `can_generate = False`, mensaje graceful, sin traceback) +
+  `GenerationService` (API para la UI, **no** conectada) + CLI
+  `scripts/generate_remasep.py`. Copy-first + salida atómica
+  (`.__working__.xlsm` → `outputs/REMASEP_2026_07_DRAFT.xlsm`), SHA256 de la
+  plantilla verificado sin cambios. Preflight (duplicados, tipo/negativo,
+  faltantes, zero_write_policy, salida fuera de `data/`, no sobrescribe).
+  Compatibilidad por `structural_template_fingerprint` leído del manifiesto
+  (`stf:dc624775927d4d4d`). Defense-in-depth por celda: nunca sobrescribe una
+  fórmula (`TARGET_FORMULA_CONFLICT`). `Value2`, 0 explícito. `CalculateFullRebuild`.
+  Verificación posterior: integridad de fórmulas (0 `FORMULA_EXPRESSION_CHANGE`),
+  VBA presente antes/después, 1122 celdas destino, fingerprint. `ControlResult`
+  (`PASS/FAIL_INTERNAL_VALIDATION` / `CONTROL_UNAVAILABLE`) con mapa versionado
+  `config/excel_writer_2026/control_map.yaml` — **`writer_integrity_status` es
+  independiente de `control_status`** (faltan EGRESOS / recursos / tabla
+  quirúrgica / metadatos). Modos `DIAGNOSTIC_REFERENCE` (scope 1364) /
+  `PRODUCTION` (2114); archivo `NOT_FOR_SUBMISSION`, nunca `FINAL_READY` mientras
+  `estado_filter_status = PENDING_FUNCTIONAL_CONFIRMATION`.
+  `historical_reference_cache_status = KNOWN_STALE_FOR_142_WRITE_READY_VALUES`:
+  se escribe el MetricValue del motor actual, nunca el valor cacheado histórico.
+  Tests: 37 unitarios con `FakeWorkbookWriter` + 2 de integración COM marcados
+  `@pytest.mark.excel` (se saltan fuera de Windows). Ver
+  [`docs/EXCEL_WRITER.md`](EXCEL_WRITER.md). **Falta**: correr
+  `scripts/generate_remasep.py` en Windows con Excel para producir el primer
+  `.xlsm` real y revisar sus artefactos.
 - **3.7+ — dimensiones de actividad / especialidad** y traducción a la tabla
   larga semántica: **pendiente**.
 - **Modelo de *provenance* / `source`**: `MEDINET` se aplica en 3.1–3.3; el delta
@@ -219,8 +248,11 @@ fuentes reales:
 
 ## Lo que el sistema todavía **no** hace
 
-- No genera el REMASEP oficial (no hay mapping ni escritura Excel).
-- No integra egresos ni recursos/pabellones.
+- No genera todavía un REMASEP oficial entregable: el Excel writer (3.7B) está
+  implementado y probado con dobles, pero **falta la corrida real en Windows con
+  Excel** y el archivo se marca `NOT_FOR_SUBMISSION` mientras el filtro por
+  ESTADO siga pendiente. La UI no está conectada.
+- No integra egresos ni recursos/pabellones (CONTROL reportará errores por eso).
 - No valida las reglas legacy contra reglas oficiales MINSAL.
 - La equivalencia demostrada es **numérica contra el workbook generador**, con la
   cache de `AF` no verificable — no es una validación funcional del REMASEP.

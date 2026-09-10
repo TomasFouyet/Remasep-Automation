@@ -97,6 +97,14 @@
   la referencia legacy (1122/1122 vs. caché legacy; 980 MATCH / 142 MISMATCH por
   caché `AF` obsoleta vs. valor reevaluado) y `zero_write_policy = WRITE_ZERO`
   (evidence-derived). **No escribe Excel.**
+- [`EXCEL_WRITER.md`](EXCEL_WRITER.md) — Sprint 3.7B: escribe los `PendingWrite`
+  en una **copia** del REMASEP oficial con Microsoft Excel Desktop (COM,
+  Windows). Contrato `WorkbookWriter` + `ExcelComWorkbookWriter` + `FakeWorkbookWriter`;
+  `ExcelCapability` (en WSL `can_generate = False`, graceful); copy-first +
+  salida atómica; preflight; verificación de integridad de fórmulas/VBA y de las
+  1122 celdas; `ControlResult` (independiente de `writer_integrity_status`);
+  modos `DIAGNOSTIC_REFERENCE` / `PRODUCTION`; archivo `NOT_FOR_SUBMISSION`. UI
+  **no** conectada.
 - [`TEMPLATE_ALIGNMENT.md`](TEMPLATE_ALIGNMENT.md) — estructura de
   `REMASEP 2026_V1.4.xlsm` y candidatos de alineación por etiqueta (Sprint 1.4).
 

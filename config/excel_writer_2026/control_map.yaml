@@ -1,0 +1,35 @@
+# =============================================================================
+# Mapa de la hoja CONTROL — REMASEP_2026_V1.4
+# =============================================================================
+#
+# Layout observado por inspección estática (openpyxl) de la plantilla oficial.
+# La hoja CONTROL NO está protegida y sólo contiene fórmulas de agregación +
+# texto de causales. El writer la LEE tras recalcular; nunca la escribe.
+#
+#   D6:D14  -> etiqueta de la hoja                (texto)
+#   E6:E14  -> Nº ERRORES de esa hoja             (fórmula -> entero)
+#   F7:F14  -> "OK" / "SIN DATOS"                 (fórmula de texto)
+#   G8:G14  -> causal indicada manualmente        (texto libre)
+#   E16     -> TOTAL ERRORES = suma de E6:E14     (fórmula -> entero)
+
+version: excel_writer_2026
+sheet: CONTROL
+
+total_errors_cell: E16
+
+rows:
+  - { label_cell: D6,  errors_cell: E6,  data_status_cell: null, causal_cell: null, sheet: "HOJA NOMBRE" }
+  - { label_cell: D7,  errors_cell: E7,  data_status_cell: F7,   causal_cell: G7,   sheet: "REMASEP 01" }
+  - { label_cell: D8,  errors_cell: E8,  data_status_cell: F8,   causal_cell: G8,   sheet: "URGENCIAS" }
+  - { label_cell: D9,  errors_cell: E9,  data_status_cell: F9,   causal_cell: G9,   sheet: "REMASEP B1" }
+  - { label_cell: D10, errors_cell: E10, data_status_cell: F10,  causal_cell: G10,  sheet: "B2 ANEXO" }
+  - { label_cell: D11, errors_cell: E11, data_status_cell: F11,  causal_cell: G11,  sheet: "REMASEP_OD" }
+  - { label_cell: D12, errors_cell: E12, data_status_cell: F12,  causal_cell: G12,  sheet: "EyP_ET" }
+  - { label_cell: D13, errors_cell: E13, data_status_cell: F13,  causal_cell: G13,  sheet: "TV_MI" }
+  - { label_cell: D14, errors_cell: E14, data_status_cell: F14,  causal_cell: G14,  sheet: "SERV_SANGRE" }
+
+# "SIN DATOS" es esperable en las hojas que aún no producimos (URGENCIAS,
+# EyP_ET, TV_MI, SERV_SANGRE): no cuenta como fallo del writer.
+data_status_ok_value: "OK"
+data_status_missing_value: "SIN DATOS"
+modules_not_yet_produced: ["URGENCIAS", "EyP_ET", "TV_MI", "SERV_SANGRE", "HOJA NOMBRE", "REMASEP B1"]

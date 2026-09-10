@@ -1,0 +1,69 @@
+# =============================================================================
+# Política del Excel COM writer — Sprint 3.7B
+# =============================================================================
+#
+# Escribe `PendingWrite` (contrato del Sprint 3.7A) en una COPIA del REMASEP
+# oficial usando Microsoft Excel Desktop (COM, sólo Windows). NO recalcula
+# MetricValues. NO conecta la UI. NO produce un entregable MINSAL.
+
+version: excel_writer_2026
+status: preliminary_pending_functional_validation
+disclaimer: >-
+  Genera un archivo DRAFT / NOT_FOR_SUBMISSION. Mientras el filtro por ESTADO
+  siga PENDING_FUNCTIONAL_CONFIRMATION no se emite ningún estado FINAL_READY.
+  PASS_INTERNAL_VALIDATION (hoja CONTROL) != MINSAL_APPROVED.
+
+# --- modos de generación --------------------------------------------------
+# DIAGNOSTIC_REFERENCE  -> MetricValues del modo LEGACY_EQUIVALENCE_DIAGNOSTIC
+#                          (scope 1364). Para probar el writer end-to-end.
+# PRODUCTION            -> MetricValues del modo PRODUCTION_PERIOD_SCOPE
+#                          (scope real del período, sin filtro ESTADO).
+modes:
+  DIAGNOSTIC_REFERENCE:
+    producer_mode: LEGACY_EQUIVALENCE_DIAGNOSTIC
+    max_status: NOT_FOR_SUBMISSION
+    submission_label: NOT_FOR_SUBMISSION
+  PRODUCTION:
+    producer_mode: PRODUCTION_PERIOD_SCOPE
+    # conservador: mientras estado_filter_status esté pendiente, sólo DRAFT.
+    max_status: DRAFT
+    submission_label: NOT_FOR_SUBMISSION
+
+# El writer nunca emite FINAL_READY mientras esto sea true.
+estado_filter_pending: true
+final_ready_allowed: false
+
+# --- semántica del cero (se lee la política evidence-derived del 3.7A) ---
+zero_write_policy_config: config/metric_value_producer_2026/zero_write_policy.yaml
+# el writer sólo procede si la política del cero es una de éstas:
+zero_write_policy_accepted: [WRITE_ZERO, FORM_SPECIFIC]
+# WRITE_ZERO -> el 0 se escribe explícito con Value2; nunca blanco por 0.
+
+# --- compatibilidad de plantilla ---------------------------------------
+# El fingerprint esperado se LEE del manifiesto (columna template_fingerprint_id);
+# este valor es sólo un fallback informativo y debe coincidir.
+template_compatibility:
+  bind_to: structural_template_fingerprint
+  expected_fingerprint_id_fallback: "stf:dc624775927d4d4d"
+  manifest: artifacts/writable_target_mapping/write_manifest_ready.csv
+
+# --- referencia histórica (Sprint 3.7A §13) ---------------------------
+historical_reference_cache_status: KNOWN_STALE_FOR_142_WRITE_READY_VALUES
+# El writer escribe el MetricValue del motor ACTUAL. Nunca el valor cacheado
+# histórico para forzar igualdad con `REMASEP_V1.4 Julio 2026.xlsm`.
+
+# --- salida -----------------------------------------------------------
+output:
+  directory: outputs
+  # nunca dentro de data/local; nunca sobrescribir en silencio.
+  overwrite_existing: false
+  working_suffix: ".__working__"
+  draft_name_template: "REMASEP_{year}_{month:02d}_DRAFT.xlsm"
+  final_name_template: "REMASEP_{year}_{month:02d}.xlsm"
+
+# --- CONTROL --------------------------------------------------------
+control_map: config/excel_writer_2026/control_map.yaml
+# En la primera generación sólo-MEDINET NO se exige CONTROL == 0: la plantilla
+# también necesita EGRESOS / recursos / tabla quirúrgica / metadatos que aún no
+# producimos. writer_integrity_status es independiente de control_status.
+require_control_zero: false
