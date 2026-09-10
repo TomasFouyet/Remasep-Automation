@@ -80,6 +80,12 @@ def _production_inputs(args, period: Period):
         "zero_write_policy": bundle.zero_write_policy,
         "completeness": result.completeness,
         "scope_records": result.scope_records,
+        "estado_note": (
+            f"ESTADO {result.scope.estado_filter_status}: "
+            f"{result.scope.period_scope_records} → {result.scope.processing_scope_records} "
+            f"(excluidos {result.scope.estado_excluded_records}; "
+            f"incluidos {list(result.scope.estado_included_states)})"
+        ),
     }
 
 
@@ -214,6 +220,8 @@ def main(argv: list[str] | None = None) -> int:
     print(f"  control_status: {r.control_status}")
     print(f"  celdas escritas y verificadas: {r.written_cells} / {len(pending)}")
     print(f"  scope_records: {data['scope_records']}")
+    if data.get("estado_note"):
+        print(f"  {data['estado_note']}")
     print(f"  plantilla intacta: {r.template_unchanged}")
     if r.output_path:
         print(f"  salida: {r.output_path}")

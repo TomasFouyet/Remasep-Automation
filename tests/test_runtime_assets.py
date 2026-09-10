@@ -36,7 +36,15 @@ def test_committed_bundle_loads_and_validates():
     assert bundle.detail_sheet == "Atenciones - Detalles de citas"
     assert set(bundle.detail_columns_map) >= {"DIA_CITA", "SEXO", "PRESTACION", "ESTADO"}
     assert bundle.zero_write_policy == "WRITE_ZERO"
-    assert bundle.estado_filter_status == "PENDING_FUNCTIONAL_CONFIRMATION"
+    # Sprint 3.9 fase 2: regla ESTADO confirmada funcionalmente
+    assert bundle.estado_filter_status == "CONFIRMED"
+    assert bundle.estado_filter.confirmed is True
+    assert bundle.estado_filter.included_states == (
+        "Atendido", "En Sala de Espera", "Atención Pausada", "En Atención",
+    )
+    assert bundle.estado_filter.excluded_states == (
+        "Cancelado", "No Se Presenta", "Agendado", "Confirmado", "Re-Agendado",
+    )
     # el catálogo cubre las 1122 + dependencias transitivas
     assert len(bundle.formula_index) >= 1122
     for w in bundle.write_instructions:
@@ -160,3 +168,58 @@ def test_zero_policy_incompatible(sandbox):
     with pytest.raises(RuntimeAssetError) as exc:
         load_runtime_bundle(sandbox)
     assert exc.value.code == RUNTIME_ASSET_INCOMPATIBLE
+
+
+def _rewrite_estado(sandbox, doc):
+    (sandbox / "estado_filter.yaml").write_text(yaml.safe_dump(doc, allow_unicode=True))
+    _rehash(sandbox, "estado_filter.yaml")
+
+
+def test_estado_filter_unknown_status_is_invalid(sandbox):
+    _rewrite_estado(sandbox, {
+        "version": "runtime_2026", "status": "MAYBE",
+        "included_states": ["Atendido"], "excluded_states": [],
+    })
+    _rewrite_bundle(sandbox, estado_filter_status="MAYBE")
+    with pytest.raises(RuntimeAssetError) as exc:
+        load_runtime_bundle(sandbox)
+    assert exc.value.code == RUNTIME_ASSET_INVALID
+    assert "estado_filter.status" in str(exc.value)
+
+
+def test_estado_filter_confirmed_without_states_is_invalid(sandbox):
+    _rewrite_estado(sandbox, {
+        "version": "runtime_2026", "status": "CONFIRMED",
+        "included_states": [], "excluded_states": [],
+    })
+    with pytest.raises(RuntimeAssetError) as exc:
+        load_runtime_bundle(sandbox)
+    assert exc.value.code == RUNTIME_ASSET_INVALID
+    assert "included_states" in str(exc.value)
+
+
+def test_estado_filter_overlapping_states_is_invalid(sandbox):
+    _rewrite_estado(sandbox, {
+        "version": "runtime_2026", "status": "CONFIRMED",
+        "included_states": ["Atendido", "Cancelado"],
+        "excluded_states": ["Cancelado"],
+    })
+    with pytest.raises(RuntimeAssetError) as exc:
+        load_runtime_bundle(sandbox)
+    assert exc.value.code == RUNTIME_ASSET_INVALID
+    assert "included y excluded" in str(exc.value)
+
+
+def test_estado_filter_top_level_mismatch_is_invalid(sandbox):
+    _rewrite_bundle(sandbox, estado_filter_status="PENDING_FUNCTIONAL_CONFIRMATION")
+    with pytest.raises(RuntimeAssetError) as exc:
+        load_runtime_bundle(sandbox)
+    assert exc.value.code == RUNTIME_ASSET_INVALID
+    assert "estado_filter_status" in str(exc.value)
+
+
+def test_estado_filter_missing_asset_is_missing_error(sandbox):
+    (sandbox / "estado_filter.yaml").unlink()
+    with pytest.raises(RuntimeAssetError) as exc:
+        load_runtime_bundle(sandbox)
+    assert exc.value.code == RUNTIME_ASSET_MISSING

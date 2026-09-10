@@ -66,6 +66,10 @@ _CATALOG_COLUMNS = ("metric_id", "sheet", "cell", "kind", "value_ref_coords", "f
 
 _ACCEPTED_ZERO_POLICIES = ("WRITE_ZERO", "FORM_SPECIFIC")
 
+ESTADO_FILTER_CONFIRMED = "CONFIRMED"
+ESTADO_FILTER_PENDING = "PENDING_FUNCTIONAL_CONFIRMATION"
+_ACCEPTED_ESTADO_STATUS = (ESTADO_FILTER_CONFIRMED, ESTADO_FILTER_PENDING)
+
 
 class RuntimeAssetError(RemasepError):
     """Falta / corrupción / incompatibilidad de un asset de runtime."""
@@ -128,6 +132,46 @@ def _sha256(path: Path) -> str:
 # ---------------------------------------------------------------------------
 
 
+def _norm_estado(value: object) -> str:
+    """Normalización estándar del proyecto para ESTADO: espacios externos +
+    minúsculas (con tildes). No hay aliases."""
+    if value is None:
+        return ""
+    return str(value).strip().casefold()
+
+
+@dataclass(frozen=True)
+class EstadoFilterRule:
+    """Regla del campo ESTADO de Medinet, versionada en
+    ``config/runtime_2026/estado_filter.yaml``."""
+
+    status: str
+    included_states: tuple[str, ...]
+    excluded_states: tuple[str, ...]
+    normalization: str = "strip_casefold"
+    confirmed_source: str = ""
+
+    @property
+    def confirmed(self) -> bool:
+        return self.status == ESTADO_FILTER_CONFIRMED and bool(self.included_states)
+
+    def included_normalized(self) -> frozenset[str]:
+        return frozenset(_norm_estado(s) for s in self.included_states)
+
+    def includes(self, estado: object) -> bool:
+        return _norm_estado(estado) in self.included_normalized()
+
+    def as_dict(self) -> dict:
+        return {
+            "status": self.status,
+            "confirmed": self.confirmed,
+            "confirmed_source": self.confirmed_source,
+            "normalization": self.normalization,
+            "included_states": list(self.included_states),
+            "excluded_states": list(self.excluded_states),
+        }
+
+
 @dataclass(frozen=True)
 class WriteInstructionRow:
     """Contrato semántico de una instrucción de escritura (sin PII, sin valores)."""
@@ -156,8 +200,12 @@ class RuntimeBundle:
     formula_index: dict[str, LegacyFormulaSpec]
     expected_instruction_count: int
     zero_write_policy: str
-    estado_filter_status: str
+    estado_filter: EstadoFilterRule
     asset_sha256: dict[str, str] = field(default_factory=dict)
+
+    @property
+    def estado_filter_status(self) -> str:
+        return self.estado_filter.status
 
     # -- interfaces que consume el productor -------------------------
     @property
@@ -313,6 +361,23 @@ def _validate(bundle: RuntimeBundle) -> None:
             f"zero_write_policy {bundle.zero_write_policy!r} no aceptada",
         )
 
+    ef = bundle.estado_filter
+    if ef.status not in _ACCEPTED_ESTADO_STATUS:
+        raise RuntimeAssetError(
+            RUNTIME_ASSET_INVALID, f"estado_filter.status {ef.status!r} no reconocido"
+        )
+    if ef.status == ESTADO_FILTER_CONFIRMED:
+        if not ef.included_states:
+            raise RuntimeAssetError(
+                RUNTIME_ASSET_INVALID, "estado_filter CONFIRMED sin included_states"
+            )
+        overlap = ef.included_normalized() & frozenset(_norm_estado(s) for s in ef.excluded_states)
+        if overlap:
+            raise RuntimeAssetError(
+                RUNTIME_ASSET_INVALID,
+                f"estado_filter: estados en included y excluded a la vez: {sorted(overlap)}",
+            )
+
 
 def _verify_sha256(root: Path, declared: Mapping[str, str]) -> dict[str, str]:
     actual: dict[str, str] = {}
@@ -346,6 +411,14 @@ def load_runtime_bundle(root: str | Path | None = None) -> RuntimeBundle:
     }
 
     zero_doc = _load_yaml(_require(runtime_root / doc.get("zero_policy", "zero_policy.yaml")))
+    estado_doc = _load_yaml(_require(runtime_root / doc.get("estado_filter", "estado_filter.yaml")))
+    estado_filter = EstadoFilterRule(
+        status=str(estado_doc.get("status", ESTADO_FILTER_PENDING)),
+        included_states=tuple(str(s) for s in (estado_doc.get("included_states") or [])),
+        excluded_states=tuple(str(s) for s in (estado_doc.get("excluded_states") or [])),
+        normalization=str(estado_doc.get("normalization", "strip_casefold")),
+        confirmed_source=str(estado_doc.get("confirmed_source", "")),
+    )
 
     manifest = _read_manifest(runtime_root / doc.get("write_manifest", "write_manifest.csv"))
     catalog = _read_catalog(runtime_root / doc.get("metric_catalog", "metric_catalog.csv"))
@@ -361,9 +434,16 @@ def load_runtime_bundle(root: str | Path | None = None) -> RuntimeBundle:
         formula_index=catalog,
         expected_instruction_count=int(doc.get("expected_instruction_count", len(manifest))),
         zero_write_policy=str(zero_doc.get("resolution", "UNRESOLVED")),
-        estado_filter_status=str(doc.get("estado_filter_status", "PENDING_FUNCTIONAL_CONFIRMATION")),
+        estado_filter=estado_filter,
         asset_sha256=asset_sha,
     )
+    top_level_status = doc.get("estado_filter_status")
+    if top_level_status and str(top_level_status) != estado_filter.status:
+        raise RuntimeAssetError(
+            RUNTIME_ASSET_INVALID,
+            f"bundle.yaml estado_filter_status={top_level_status!r} != "
+            f"estado_filter.yaml status={estado_filter.status!r}",
+        )
     if not bundle.detail_sheet or not bundle.detail_columns_map:
         raise RuntimeAssetError(RUNTIME_ASSET_INVALID, "detail_contract.yaml incompleto")
     _validate(bundle)
