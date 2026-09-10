@@ -44,10 +44,29 @@ Excel **nunca**; sólo lo hace la implementación COM.
 
 `win32com.client.DispatchEx("Excel.Application")` — **instancia aislada**, nunca
 `Dispatch()` compartido ni `GetObject`. Sobre esa instancia: `Visible = False`,
-`DisplayAlerts = False`. Al terminar se cierra **sólo** el workbook y la
-instancia creados por nosotros (`Workbook.Close(SaveChanges=False)` +
-`Application.Quit()` + `CoUninitialize`). Nunca `taskkill` / matar `Excel.exe` /
-tocar procesos del usuario.
+`DisplayAlerts = False`. Nunca `taskkill` / matar `Excel.exe` / tocar procesos
+del usuario.
+
+**Cierre determinista** (patch de cierre 3.7B). El desmontaje sigue este orden
+exacto para no dejar proxies COM que el GC de Python liberaría (`Release()`)
+*después* de desmontar el apartment — la causa de los `RPC_E_DISCONNECTED`
+(`0x80010108`) / `RPC server unavailable` (`0x800706ba`) / `RPC call failed`
+(`0x800706be`) que aparecían durante el GC:
+
+1. `CoInitialize()` en `__enter__`, siempre balanceado con `CoUninitialize()` en
+   `_teardown()` (flag `_co_initialized`).
+2. `Workbook.Close(SaveChanges=False)` + soltar el proxy del workbook y del caché
+   de hojas (`= None`) + `gc.collect()`.
+3. `Application.Quit()` sobre **esa** instancia, defensivo ante `com_error`
+   (Excel puede haber muerto).
+4. Soltar el proxy de `Application` (`excel = None`) y `gc.collect()` — fuerza su
+   `Release()` **con el apartment todavía inicializado**.
+5. Recién entonces `CoUninitialize()`.
+
+`describe_com_error()` (en `excel_writer.py`) resume cualquier excepción COM a
+`Clase(0xHRESULT)` sin volcar traceback ni importar `pythoncom` a nivel de
+módulo. `_probe_excel_com()` de `ExcelCapability` usa el mismo patrón, de modo
+que llamarlo repetidas veces es estable y no deja procesos huérfanos.
 
 ## Macros / seguridad
 
@@ -100,8 +119,19 @@ explícito**; nunca blanco por 0 (`zero_write_policy = WRITE_ZERO`, evidencia de
 
 ## Recálculo
 
-Tras escribir: `Application.CalculateFullRebuild()` y espera activa hasta
-`CalculationState == xlDone` antes de guardar. No se confía en caches previas.
+Tras escribir: `Application.Calculation = xlAutomatic` +
+`Application.CalculateFullRebuild()`, y luego una **espera real** hasta
+`Application.CalculationState == xlDone` antes de guardar:
+
+- bucle con `time.monotonic()` y `time.sleep(0.1 s)` entre consultas;
+- timeout de **120 s** (`RECALC_TIMEOUT_SECONDS`); si expira →
+  `ExcelWriterError` explícito y **no se guarda** el workbook;
+- si `CalculationState` lanza una excepción COM durante el *polling*, se
+  propaga como `ExcelWriterError` (no se oculta: hay que saber si el cálculo
+  terminó).
+
+No se confía en caches previas. `time.sleep` / `time.monotonic` son puntos de
+inyección (`_sleep` / `_monotonic`) para los tests unitarios.
 
 ## Verificación posterior (§17/§18/§19)
 
@@ -184,11 +214,29 @@ archivo generado nunca es un entregable MINSAL en este sprint.
 
 ## Qué falta para el primer Excel real
 
-1. Ejecutar `scripts/generate_remasep.py --mode diagnostic` en **Windows** con
-   Python + `pywin32` + Microsoft Excel Desktop, con acceso a
-   `data/local/REMASEP_V1.4 Julio 2026.xlsm`, `GENERACION DATOS REMASEP.xlsx` y
-   el export `detalle_citas`.
-2. Revisar `artifacts/excel_writer/` (integridad de fórmulas/VBA, verificación de
+1. **Test de integración COM** en **Windows** con Python + `pywin32` + Microsoft
+   Excel Desktop. Se pasa la celda de prueba por variables de entorno (no se
+   elige automáticamente):
+
+   ```powershell
+   $env:REMASEP_TEST_TEMPLATE = "C:\ruta\a\REMASEP_V1.4 Julio 2026.xlsm"
+   $env:REMASEP_TEST_SHEET    = "REMASEP_OD"
+   $env:REMASEP_TEST_CELL     = "K17"
+   pytest -m excel tests/test_excel_com_integration.py -vv -s
+   ```
+
+   Celda propuesta **`REMASEP_OD!K17`**: es `WRITE_READY` en el manifiesto
+   (`instruction_id wi:00a4bd2ee2668dd9e28c`, source `LEGACY::REMASEP_OD::L8`),
+   hoja protegida con la celda **desbloqueada** (`Locked = False`), sin fórmula,
+   fuera de todo merge, valor actual `0` — un sentinel `424242` es inequívoco.
+   (SECCION A / A.1 / "PRIMERAS CONSULTAS (AÑO) DE ODONTOLOGIA", fácil de
+   localizar a mano.) Alternativas equivalentes: `REMASEP_OD!AB69`
+   (`wi:00170a112286f2273a2a`) o `REMASEP 01!AK118` (`wi:00aab54517c24d1e515f`).
+
+2. Ejecutar `scripts/generate_remasep.py --mode diagnostic` en Windows, con
+   acceso a `data/local/REMASEP_V1.4 Julio 2026.xlsm`,
+   `GENERACION DATOS REMASEP.xlsx` y el export `detalle_citas`.
+3. Revisar `artifacts/excel_writer/` (integridad de fórmulas/VBA, verificación de
    las 1122 celdas, CONTROL).
-3. Confirmar funcionalmente el filtro por ESTADO para habilitar el modo
+4. Confirmar funcionalmente el filtro por ESTADO para habilitar el modo
    productivo real (fuera del alcance de este sprint).

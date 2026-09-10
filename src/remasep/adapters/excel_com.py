@@ -4,24 +4,44 @@
 métodos: importar este módulo en Linux/WSL no falla. La escritura del REMASEP
 oficial se hace exclusivamente con esta ruta (Excel COM), nunca con
 ``openpyxl.save()``.
+
+Ciclo de vida COM determinista (Sprint 3.7B — patch de cierre): se sueltan
+**todas** las referencias COM y se fuerza su ``Release()`` (``= None`` +
+``gc.collect()``) **antes** de ``CoUninitialize`` / de que muera el proceso de
+Excel, para no dejar proxies que el GC de Python liberaría en un apartment ya
+desmontado (causa de ``RPC_E_DISCONNECTED`` / ``RPC server unavailable``).
 """
 
 from __future__ import annotations
 
 import contextlib
+import gc
 import platform
+import time
 from collections.abc import Iterator
 from contextlib import AbstractContextManager, contextmanager
 from pathlib import Path
 
 from remasep.core.errors import TemplateValidationError
-from remasep.services.excel_writer import ExcelWriterError, WorkbookSnapshot
+from remasep.services.excel_writer import (
+    ExcelWriterError,
+    WorkbookSnapshot,
+    describe_com_error,
+)
 
 # Constantes de Excel (evitan depender de la typelib).
 _XL_CALC_MANUAL = -4135
 _XL_CALC_AUTOMATIC = -4105
-_XL_CALC_STATE_DONE = 0
+_XL_CALC_STATE_DONE = 0  # xlDone
 _XL_OPENXML_MACRO_ENABLED = 52
+
+# Espera de recálculo.
+RECALC_TIMEOUT_SECONDS = 120.0
+RECALC_POLL_SECONDS = 0.1
+
+# Puntos de inyección para tests (se monkeypatchean; en producción son los reales).
+_sleep = time.sleep
+_monotonic = time.monotonic
 
 
 class ExcelSession(AbstractContextManager):
@@ -30,6 +50,7 @@ class ExcelSession(AbstractContextManager):
     def __init__(self, *, visible: bool = False):
         self.visible = visible
         self.excel = None
+        self._co_initialized = False
 
     def __enter__(self):
         if platform.system() != "Windows":
@@ -39,9 +60,14 @@ class ExcelSession(AbstractContextManager):
         import win32com.client  # type: ignore[import-not-found]
 
         pythoncom.CoInitialize()
-        self.excel = win32com.client.DispatchEx("Excel.Application")
-        self.excel.Visible = self.visible
-        self.excel.DisplayAlerts = False
+        self._co_initialized = True
+        try:
+            self.excel = win32com.client.DispatchEx("Excel.Application")
+            self.excel.Visible = self.visible
+            self.excel.DisplayAlerts = False
+        except BaseException:
+            self._teardown()
+            raise
         return self
 
     def open_workbook(self, path: str | Path, *, read_only: bool = False):
@@ -52,29 +78,60 @@ class ExcelSession(AbstractContextManager):
             ReadOnly=read_only,
         )
 
-    def calculate_full(self) -> None:
+    def calculate_full(self, *, timeout: float = RECALC_TIMEOUT_SECONDS) -> None:
+        """Recálculo completo con **espera real** hasta ``xlDone``.
+
+        Llama ``CalculateFullRebuild()`` y luego consulta
+        ``Application.CalculationState`` en bucle usando ``time.monotonic()`` y
+        un ``sleep`` breve entre consultas. Si el cálculo no termina dentro de
+        ``timeout`` segundos lanza :class:`ExcelWriterError` y **no** se guarda
+        nada. No se ocultan las excepciones que impidan saber si terminó.
+        """
         if self.excel is None:
             raise RuntimeError("La sesión Excel no está inicializada.")
         self.excel.Calculation = _XL_CALC_AUTOMATIC
         self.excel.CalculateFullRebuild()
-        # Esperar a que Excel termine el cálculo antes de guardar.
-        with contextlib.suppress(Exception):
-            for _ in range(600):
-                if int(self.excel.CalculationState) == _XL_CALC_STATE_DONE:
-                    break
-                self.excel.Wait(0)
+
+        deadline = _monotonic() + timeout
+        while True:
+            try:
+                state = int(self.excel.CalculationState)
+            except Exception as exc:
+                raise ExcelWriterError(
+                    "no se pudo consultar Application.CalculationState durante el "
+                    f"recálculo: {describe_com_error(exc)}"
+                ) from exc
+            if state == _XL_CALC_STATE_DONE:
+                return
+            if _monotonic() >= deadline:
+                raise ExcelWriterError(
+                    f"el recálculo de Excel no terminó en {timeout:.0f}s "
+                    f"(Application.CalculationState={state}); no se guarda el workbook"
+                )
+            _sleep(RECALC_POLL_SECONDS)
+
+    # -- teardown determinista -------------------------------------
+    def _teardown(self) -> None:
+        excel = self.excel
+        self.excel = None
+        if excel is not None:
+            # Quit defensivo: Excel puede haber muerto ya.
+            with contextlib.suppress(Exception):
+                excel.DisplayAlerts = False
+            with contextlib.suppress(Exception):
+                excel.Quit()
+        # Soltar el proxy y forzar su Release() ANTES de desmontar el apartment.
+        excel = None
+        gc.collect()
+        if self._co_initialized:
+            self._co_initialized = False
+            with contextlib.suppress(Exception):
+                import pythoncom  # type: ignore[import-not-found]
+
+                pythoncom.CoUninitialize()
 
     def __exit__(self, exc_type, exc, tb):
-        if self.excel is not None:
-            try:
-                self.excel.DisplayAlerts = False
-                self.excel.Quit()
-            finally:
-                self.excel = None
-                with contextlib.suppress(Exception):
-                    import pythoncom  # type: ignore[import-not-found]
-
-                    pythoncom.CoUninitialize()
+        self._teardown()
         return False
 
 
@@ -149,7 +206,7 @@ class ExcelComWorkbookWriter:
             rng.Value2 = value
         except Exception as exc:
             raise ExcelWriterError(
-                f"no se pudo escribir {sheet}!{cell}: {exc.__class__.__name__}"
+                f"no se pudo escribir {sheet}!{cell}: {describe_com_error(exc)}"
             ) from exc
 
     def recalculate(self) -> None:
@@ -167,8 +224,16 @@ class ExcelComWorkbookWriter:
         )
 
     def close(self, *, save_changes: bool = False) -> None:
-        with contextlib.suppress(Exception):
-            self._wb.Close(SaveChanges=save_changes)
+        wb = self._wb
+        self._wb = None
+        self._sheet_cache = {}
+        if wb is not None:
+            with contextlib.suppress(Exception):  # Close defensivo
+                wb.Close(SaveChanges=save_changes)
+        # Soltar los proxies del workbook/hojas antes de que la sesión desmonte
+        # el apartment.
+        wb = None
+        gc.collect()
 
 
 @contextmanager
@@ -176,7 +241,8 @@ def open_excel_com_writer(path: str | Path) -> Iterator[ExcelComWorkbookWriter]:
     """``open_writer`` para :func:`remasep.services.excel_writer.generate` en Windows.
 
     Crea una instancia aislada de Excel, abre la copia de trabajo, y al salir
-    cierra **sólo** ese workbook y esa instancia.
+    cierra **sólo** ese workbook y esa instancia, soltando todas las referencias
+    COM antes de ``CoUninitialize``.
     """
     if platform.system() != "Windows":  # pragma: no cover - guard
         raise ExcelWriterError("Excel COM sólo está disponible en Windows.")
@@ -189,4 +255,6 @@ def open_excel_com_writer(path: str | Path) -> Iterator[ExcelComWorkbookWriter]:
     finally:
         if writer is not None:
             writer.close(save_changes=False)
+        writer = None
+        gc.collect()
         session.__exit__(None, None, None)

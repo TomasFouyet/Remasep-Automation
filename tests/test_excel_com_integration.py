@@ -1,16 +1,27 @@
-"""Sprint 3.7B — tests de integración COM (Windows + Excel).
+"""Sprint 3.7B — tests de integración COM (Windows + Microsoft Excel Desktop).
 
-Se ejecutan **sólo** en Windows con Microsoft Excel Desktop y ``pywin32``. En
-cualquier otro entorno se saltan limpiamente. Trabajan siempre sobre una COPIA
-de una plantilla de test; nunca sobre un archivo fuente.
+Se ejecutan **sólo** en Windows con Excel + ``pywin32``. En cualquier otro
+entorno se saltan limpiamente. Trabajan **siempre** sobre una copia en
+``tmp_path``; nunca modifican el archivo fuente.
 
-Ejecutar (en Windows)::
+La hoja/celda de prueba se pasa por variables de entorno (no se elige ninguna
+celda automáticamente):
 
-    pytest -m excel tests/test_excel_com_integration.py
+    REMASEP_TEST_TEMPLATE   ruta a una plantilla real REMASEP .xlsm
+    REMASEP_TEST_SHEET      hoja con una celda de input desbloqueada
+    REMASEP_TEST_CELL       celda de input (sin fórmula, desbloqueada, no merge)
+
+Ejecutar (PowerShell)::
+
+    $env:REMASEP_TEST_TEMPLATE = "C:\\...\\REMASEP_V1.4 Julio 2026.xlsm"
+    $env:REMASEP_TEST_SHEET    = "REMASEP_OD"
+    $env:REMASEP_TEST_CELL     = "K17"
+    pytest -m excel tests/test_excel_com_integration.py -vv -s
 """
 
 from __future__ import annotations
 
+import os
 import platform
 import shutil
 from pathlib import Path
@@ -22,46 +33,98 @@ from remasep.services.excel_capability import detect_excel_capability
 
 pytestmark = pytest.mark.excel
 
-_TEMPLATE_ENV = "REMASEP_TEST_TEMPLATE"  # ruta a una plantilla .xlsm de prueba
+_ENV_TEMPLATE = "REMASEP_TEST_TEMPLATE"
+_ENV_SHEET = "REMASEP_TEST_SHEET"
+_ENV_CELL = "REMASEP_TEST_CELL"
+
+# Entero seguro, improbable como valor real de una métrica: fácil de reconocer.
+_SENTINEL = 424242
 
 
-def _requires_excel() -> None:
+def _skip_if_no_excel() -> None:
     if platform.system() != "Windows":
         pytest.skip("integración COM: sólo Windows")
-    if not detect_excel_capability(probe_com=True).can_generate:
-        pytest.skip("integración COM: Excel no disponible")
+    capability = detect_excel_capability(probe_com=True)
+    if not capability.can_generate:
+        pytest.skip(f"integración COM: Excel no disponible ({capability.reason})")
 
 
-def _test_template(tmp_path: Path) -> Path:
-    import os
+def _env(name: str) -> str:
+    value = os.environ.get(name)
+    if not value:
+        pytest.skip(f"integración COM: define la variable de entorno {name}")
+    return value
 
-    src = os.environ.get(_TEMPLATE_ENV)
-    if not src or not Path(src).is_file():
-        pytest.skip(f"define {_TEMPLATE_ENV} con una plantilla .xlsm de prueba")
-    dst = tmp_path / "test_template.xlsm"
+
+def _copied_template(tmp_path: Path) -> tuple[Path, Path]:
+    src = Path(_env(_ENV_TEMPLATE))
+    if not src.is_file():
+        pytest.skip(f"{_ENV_TEMPLATE} no apunta a un archivo: {src}")
+    if src.suffix.lower() != ".xlsm":
+        pytest.skip(f"{_ENV_TEMPLATE} debe ser un .xlsm")
+    dst = tmp_path / "REMASEP_TEST_COPY.xlsm"
     shutil.copy2(src, dst)
-    return dst
+    return src, dst
 
 
 def test_com_open_write_recalc_save_reopen(tmp_path):
-    _requires_excel()
+    """Abre una copia, valida la celda, escribe un sentinel, recalcula, guarda,
+    reabre en una sesión nueva y confirma persistencia. La fuente queda intacta."""
+    _skip_if_no_excel()
     from remasep.adapters.excel_com import open_excel_com_writer
 
-    template = _test_template(tmp_path)
-    sha_before = w.compute_sha256(template)
-    working = tmp_path / "out.__working__.xlsm"
-    shutil.copy2(template, working)
+    source_template, template_copy = _copied_template(tmp_path)
+    sheet = _env(_ENV_SHEET)
+    cell = _env(_ENV_CELL)
 
+    source_sha_before = w.compute_sha256(source_template)
+    copy_sha_before = w.compute_sha256(template_copy)
+    working = tmp_path / "REMASEP_TEST_OUT.xlsm"
+    shutil.copy2(template_copy, working)
+
+    # 1) abrir la copia de trabajo y validar la celda (defense-in-depth)
     with open_excel_com_writer(working) as writer:
-        assert writer.sheet_names()
-        # se espera que el llamador conozca una celda desbloqueada real:
-        pytest.skip("define aquí una celda de input real de la plantilla de prueba")
+        assert writer.has_sheet(sheet), f"la hoja {sheet!r} no existe"
+        assert not writer.cell_has_formula(sheet, cell), f"{sheet}!{cell} contiene fórmula"
+        assert not writer.cell_in_incompatible_merge(sheet, cell), (
+            f"{sheet}!{cell} pertenece a un merge incompatible"
+        )
+        assert writer.cell_is_writable(sheet, cell), (
+            f"{sheet}!{cell} no es escribible (hoja protegida y celda locked)"
+        )
+        original_value = writer.read_cell(sheet, cell)
 
-    assert w.compute_sha256(template) == sha_before  # fuente intacta
+        writer.write_value2(sheet, cell, _SENTINEL)
+        assert int(writer.read_cell(sheet, cell)) == _SENTINEL
+
+        writer.recalculate()  # espera real hasta xlDone
+        writer.save()
+
+    # 2) reabrir en una sesión COM NUEVA y confirmar que el valor persistió
+    with open_excel_com_writer(working) as reopened:
+        assert int(reopened.read_cell(sheet, cell)) == _SENTINEL
+
+    # 3) el archivo FUENTE conserva exactamente su SHA256 inicial
+    assert w.compute_sha256(source_template) == source_sha_before
+    assert w.compute_sha256(template_copy) == copy_sha_before
+
+    print(
+        f"[com-int] {sheet}!{cell}: valor original = {original_value!r} -> "
+        f"sentinel {_SENTINEL} escrito y verificado en {working.name}"
+    )
 
 
-def test_com_capability_probe_is_stable():
-    _requires_excel()
-    cap = detect_excel_capability(probe_com=True)
-    assert cap.can_generate is True
-    assert cap.excel_version
+def test_com_capability_probe_is_stable_across_repeats():
+    """Llamadas repetidas a ``detect_excel_capability(probe_com=True)`` no dejan
+    procesos huérfanos ni degradan (misma versión, sin excepciones)."""
+    _skip_if_no_excel()
+
+    versions = []
+    for _ in range(3):
+        capability = detect_excel_capability(probe_com=True)
+        assert capability.can_generate is True
+        assert capability.excel_com_available is True
+        assert capability.excel_version
+        versions.append(capability.excel_version)
+
+    assert len(set(versions)) == 1

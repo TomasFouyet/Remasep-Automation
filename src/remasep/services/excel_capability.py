@@ -7,11 +7,13 @@ traceback técnico.
 
 from __future__ import annotations
 
-import contextlib
+import gc
 import importlib.util
 import platform
 import sys
 from dataclasses import dataclass, field
+
+from remasep.services.excel_writer import describe_com_error
 
 WINDOWS_EXCEL_REQUIRED = "WINDOWS_EXCEL_REQUIRED"
 PYWIN32_NOT_INSTALLED = "PYWIN32_NOT_INSTALLED"
@@ -124,8 +126,19 @@ def detect_excel_capability(*, probe_com: bool = True) -> ExcelCapability:
     )
 
 
-def _probe_excel_com() -> tuple[str | None, bool, str]:  # pragma: no cover - Windows only
-    """Instancia una copia aislada de Excel, lee su versión y la cierra."""
+def _probe_excel_com() -> tuple[str | None, bool, str]:
+    """Instancia una copia aislada de Excel, lee su versión y la cierra.
+
+    Ciclo de vida COM determinista para no dejar proxies que Python liberaría
+    (``Release()``) **después** de desmontar el apartment — la causa de los
+    ``RPC_E_DISCONNECTED`` / ``RPC server unavailable`` durante el GC:
+
+    1. ``CoInitialize`` / ``CoUninitialize`` balanceados (siempre en ``finally``).
+    2. ``DispatchEx`` — instancia aislada, nunca ``Dispatch()`` compartido.
+    3. ``Quit`` sólo sobre esa instancia, defensivo ante ``com_error``.
+    4. Se sueltan **todas** las referencias COM y se fuerza su ``Release()``
+       (``excel = None`` + ``gc.collect()``) **antes** de ``CoUninitialize``.
+    """
     try:
         import pythoncom  # type: ignore[import-not-found]
         import win32com.client  # type: ignore[import-not-found]
@@ -134,16 +147,27 @@ def _probe_excel_com() -> tuple[str | None, bool, str]:  # pragma: no cover - Wi
 
     pythoncom.CoInitialize()
     excel = None
+    version: str | None = None
+    ok = False
+    note = "com_probe_ok"
     try:
         excel = win32com.client.DispatchEx("Excel.Application")
         excel.Visible = False
         excel.DisplayAlerts = False
         version = str(excel.Version)
-        return version, True, "com_probe_ok"
+        ok = True
     except Exception as exc:  # noqa: BLE001 - se resume a un motivo legible
-        return None, False, f"com_error={exc.__class__.__name__}"
+        note = f"com_error={describe_com_error(exc)}"
     finally:
+        # 1) Quit sólo esta instancia (defensivo: Excel puede haber muerto).
         if excel is not None:
-            with contextlib.suppress(Exception):
+            try:
                 excel.Quit()
+            except Exception as exc:  # noqa: BLE001
+                note = f"{note};quit_error={describe_com_error(exc)}"
+        # 2) Soltar la referencia y forzar Release() AHORA, con el apartment vivo.
+        excel = None
+        gc.collect()
+        # 3) Recién ahora desmontar el apartment (balancea el CoInitialize).
         pythoncom.CoUninitialize()
+    return version, ok, note

@@ -66,6 +66,22 @@ class ExcelWriterError(RemasepError):
     """Error del Excel writer con mensaje claro (sin traceback al usuario)."""
 
 
+def describe_com_error(exc: BaseException) -> str:
+    """Resume una excepción COM a algo legible (``clase(0xHRESULT)``).
+
+    Sirve para reportar fallos de Excel sin volcar un traceback ni depender de
+    ``pythoncom`` a nivel de módulo.
+    """
+    hresult = getattr(exc, "hresult", None)
+    if hresult is None and getattr(exc, "args", None):
+        first = exc.args[0]
+        if isinstance(first, int):
+            hresult = first
+    if isinstance(hresult, int):
+        return f"{exc.__class__.__name__}(0x{hresult & 0xFFFFFFFF:08X})"
+    return exc.__class__.__name__
+
+
 # ---------------------------------------------------------------------------
 # Contrato del writer
 # ---------------------------------------------------------------------------
