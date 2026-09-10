@@ -109,6 +109,10 @@ def _csv(path: Path, header: list[str], rows) -> None:
         writer.writerows(rows)
 
 
+def _lock_str(locked: bool | None) -> str:
+    return "unknown" if locked is None else ("locked" if locked else "unlocked")
+
+
 def _ctx(*parts) -> str:
     flat: list[str] = []
     for part in parts:
@@ -379,11 +383,12 @@ def write_outputs(analysis: dict, output_dir: Path) -> list[Path]:
     p = output_dir / "target_metric_inventory.csv"
     _csv(p, [
         "target_sheet", "target_cell", "form", "target_kind", "target_alignment_role",
-        "section_path", "row_path", "column_path", "sex_value", "age_min", "age_max",
-        "aggregation_scope", "procedure_code", "has_formula",
+        "target_locked", "section_path", "row_path", "column_path", "sex_value",
+        "age_min", "age_max", "aggregation_scope", "procedure_code", "has_formula",
         "target_source_expectation", "target_source_evidence", "semantic_signature",
     ], (
         [t.target_sheet, t.target_cell, t.form, t.target_kind, t.target_alignment_role,
+         _lock_str(t.target_locked),
          _ctx(t.section_path), _ctx(t.row_path), _ctx(t.column_path), t.sex_value,
          t.age_min if t.age_min is not None else "",
          t.age_max if t.age_max is not None else "",
@@ -415,14 +420,14 @@ def write_outputs(analysis: dict, output_dir: Path) -> list[Path]:
     _csv(p, [
         "source_metric_id", "source_form", "source_kind", "source_readiness",
         "target_sheet", "target_cell", "target_kind", "target_alignment_role",
-        "match_status", "match_score",
+        "target_locked", "match_status", "match_score",
         "source_semantic_signature", "target_semantic_signature",
         "sex_match", "age_match", "procedure_match", "row_match", "column_match",
         "section_match", "target_source_expectation", "needs_human_review",
     ], (
         [r.source_metric_id, r.source_form, r.source_kind, r.source_readiness,
          r.target_sheet, r.target_cell, r.target_kind, r.target_alignment_role,
-         r.match_status, r.match_score,
+         _lock_str(r.target_locked), r.match_status, r.match_score,
          r.source_semantic_signature, r.target_semantic_signature,
          r.sex_match, r.age_match, r.procedure_match, r.row_match, r.column_match,
          r.section_match, r.target_source_expectation,

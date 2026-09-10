@@ -1,0 +1,94 @@
+# =============================================================================
+# Política de WRITE READINESS del mapeo semántico -> plantilla oficial — Sprint 3.6
+# =============================================================================
+#
+# Capa por ENCIMA del semantic alignment (Sprint 3.5). Decide, por alignment
+# resuelto: ¿puede convertirse en una instrucción de escritura automática?
+# ¿necesita revisión? ¿está bloqueado? ¿no es escribible?
+#
+# `write_status` ∈ WRITE_READY · WRITE_REVIEW_REQUIRED · WRITE_BLOCKED ·
+# NOT_WRITABLE — **distinto** de `readiness` (Sprint 3.3) y de `match_status`
+# (Sprint 3.5). Las capas se mantienen separadas.
+#
+# NO se escribe Excel. NO se aplica el filtro por ESTADO (pendiente de
+# confirmación funcional). NO se resuelven los 34 AMBIGUOUS ni los 5 conflictos.
+
+version: writable_target_mapping_2026
+status: preliminary_pending_functional_validation
+disclaimer: >-
+  Mapeo estructural de DÓNDE escribir, no de QUÉ población clínica entra ni de
+  QUÉ valor se escribe. Pendiente de validación funcional por Fundación Gantz /
+  MINSAL.
+
+# --- fuentes y targets admisibles ---------------------------------
+allowed_sources:
+  readiness: [AUTO_READY]           # única readiness elegible (Sprint 3.3)
+allowed_targets:
+  target_kind: [DIRECT_INPUT_TARGET]
+  target_alignment_role: [INPUT_TARGET]
+  target_locked: [false]            # revalidación defensiva de la protección Excel
+  target_source_expectation: [MEDINET]  # nunca EGRESOS / recursos / tabla quirúrgica / CONTROL
+
+# --- evidencia de match requerida --------------------------------
+# EXACT que cumple `allowed_*` y no tiene condición bloqueante -> WRITE_READY.
+exact_match:
+  write_ready: true
+
+# STRONG NO se convierte automáticamente. Sólo es WRITE_READY si:
+#  - ninguna dimensión evaluable está en MISMATCH;
+#  - TODAS las dimensiones requeridas de la forma están en MATCH;
+#  - el resto (MISSING / NOT_APPLICABLE) son sólo dimensiones NO requeridas;
+#  - target único (garantizado: los AMBIGUOUS no llegan aquí);
+#  - sin colisión de escritura.
+# Si falta evidencia de una dimensión requerida -> WRITE_REVIEW_REQUIRED.
+strong_match:
+  auto_write_ready: true
+  no_dimension_mismatch: true
+  # dimensiones (observables en el alignment row) que deben estar MATCH por forma.
+  # PARTIAL / MISSING en una requerida => WRITE_REVIEW_REQUIRED.
+  required_dimensions:
+    default: [SECTION, ROW_PATH, COLUMN_PATH]
+    by_form:
+      REMASEP_OD: [SECTION, ROW_PATH, COLUMN_PATH, SEX, AGE]
+      REMASEP_01: [SECTION, ROW_PATH, COLUMN_PATH, SEX, AGE]
+      B2_ANEXO: [ROW_PATH, PROCEDURE_CODE]
+  acceptable_evidence: [MATCH, NOT_APPLICABLE]   # para dimensiones NO requeridas
+
+# --- tipo de valor esperado -------------------------------------
+expected_value_type:
+  # Las métricas MEDINET agregadas actuales son conteos enteros.
+  by_source_kind:
+    BASE_AGGREGATION: INTEGER_COUNT
+    DERIVED_AGGREGATION: INTEGER_COUNT
+    DOWNSTREAM_TOTAL: INTEGER_COUNT
+  default: INTEGER_COUNT
+  # si el target tiene un valor previo incompatible con el tipo esperado
+  # (p.ej. texto) -> WRITE_REVIEW_REQUIRED.
+  on_incompatible_target_value: WRITE_REVIEW_REQUIRED
+
+# --- colisiones -------------------------------------------------
+# Nunca "last write wins". Cualquier colisión -> WRITE_BLOCKED.
+collision_policy:
+  multiple_sources_same_target: WRITE_BLOCKED
+  same_source_multiple_targets: WRITE_BLOCKED
+  duplicate_instruction_identity: WRITE_BLOCKED
+  incompatible_target_reuse: WRITE_BLOCKED
+
+# --- semántica del cero (sin resolver) --------------------------
+# Un mapping puede ser WRITE_READY estructuralmente aunque esto siga abierto:
+# es una precondición del WRITER (Sprint 3.7), no de la elegibilidad de escritura.
+zero_write_policy: UNRESOLVED
+
+# --- compatibilidad de plantilla ------------------------------
+# El manifiesto se ata al `structural_template_fingerprint`, NO al SHA256 del
+# archivo: un re-guardado que cambie VBA/hash pero preserve la estructura
+# semántica (hojas, orden, layout de fórmulas, celdas desbloqueadas, merges
+# relevantes) NO invalida el manifiesto. Un cambio estructural sí.
+template_compatibility:
+  bind_to: structural_template_fingerprint
+  file_hash: informational_only
+  invalidate_on:
+    - sheet_names_or_order_changed
+    - formula_layout_fingerprint_changed
+    - unlocked_structure_fingerprint_changed
+    - relevant_merged_ranges_fingerprint_changed

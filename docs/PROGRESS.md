@@ -127,7 +127,29 @@ alineación semántica con la plantilla oficial). Para el detalle por sprint ver
   Atención}` = 1 364), marcada
   `CURRENT_LEGACY_BEHAVIOR_PENDING_FUNCTIONAL_CONFIRMATION`, **no** implementada
   como regla. Ver [`docs/MEDINET_INPUT_CONTRACT.md`](MEDINET_INPUT_CONTRACT.md).
-- **3.6+ — dimensiones de actividad / especialidad** y traducción a la tabla
+- **3.6 — Writable Target Mapping: ✅ COMPLETE.** Capa por encima del semantic
+  alignment (3.5): convierte los alignments seguros en un manifiesto de
+  **instrucciones de escritura** versionable. **No escribe Excel.** `write_status`
+  ∈ `WRITE_READY` / `WRITE_REVIEW_REQUIRED` / `WRITE_BLOCKED` / `NOT_WRITABLE` —
+  capa distinta de `readiness` y `match_status`. Policy versionada en
+  `config/writable_target_mapping_2026/`
+  (`status: preliminary_pending_functional_validation`). Resultado real (1771
+  métricas): **1122 `WRITE_READY`** (todos `EXACT`; manifiesto = 1122
+  instrucciones) · **245 `WRITE_REVIEW_REQUIRED`** (todos `STRONG`: la policy no
+  baja umbrales — `ROW_PATH PARTIAL` 170 · `SEX MISSING` 65 · `AGE MISSING` 10) ·
+  **39 `WRITE_BLOCKED`** (34 `AMBIGUOUS` + 5 `SOURCE_BLOCKED_CONFLICT`) · **365
+  `NOT_WRITABLE`** (315 roll-ups calculados por la plantilla + 50 source
+  `REVIEW_REQUIRED`). WRITE_READY por forma: REMASEP_OD 952 · REMASEP_01 165 ·
+  B2_ANEXO 5. 0 colisiones. `instruction_id` = hash de firma semántica + template
+  fingerprint (no la coordenada). `structural_template_fingerprint` distinto del
+  `file_sha256` (un re-guardado no invalida el manifiesto). `zero_write_policy =
+  UNRESOLVED` y `estado_filter_status = PENDING_FUNCTIONAL_CONFIRMATION`
+  (precondiciones del 3.7). Ver
+  [`docs/WRITABLE_TARGET_MAPPING.md`](WRITABLE_TARGET_MAPPING.md).
+- **3.7+ — value producer + Excel writer**: interfaz `MetricValue` definida
+  (`source_metric_id · value · period · producer_version`, sin PII); el valor se
+  calculará desde `processing_scope_records`. **Pendiente.**
+- **3.7+ — dimensiones de actividad / especialidad** y traducción a la tabla
   larga semántica: **pendiente**.
 - **Modelo de *provenance* / `source`**: `MEDINET` se aplica en 3.1–3.3; el delta
   del REMASEP final (3.4) clasifica `EGRESOS` / `RESOURCE_CALCULATION` /

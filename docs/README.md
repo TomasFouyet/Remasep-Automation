@@ -85,6 +85,11 @@
 - [`OFFICIAL_TEMPLATE_SEMANTIC_ALIGNMENT.md`](OFFICIAL_TEMPLATE_SEMANTIC_ALIGNMENT.md)
   — Sprint 3.5: alineación semántica de candidatos generador → plantilla oficial
   (sin escritura Excel).
+- [`WRITABLE_TARGET_MAPPING.md`](WRITABLE_TARGET_MAPPING.md) — Sprint 3.6:
+  `write_status` (`WRITE_READY` / `WRITE_REVIEW_REQUIRED` / `WRITE_BLOCKED` /
+  `NOT_WRITABLE`) y manifiesto de instrucciones de escritura versionable
+  (1122 `WRITE_READY`, todos `EXACT`). `instruction_id` semántico, no coordenada;
+  `structural_template_fingerprint` ≠ `file_sha256`. **No escribe Excel.**
 - [`TEMPLATE_ALIGNMENT.md`](TEMPLATE_ALIGNMENT.md) — estructura de
   `REMASEP 2026_V1.4.xlsm` y candidatos de alineación por etiqueta (Sprint 1.4).
 

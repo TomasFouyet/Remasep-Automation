@@ -84,6 +84,10 @@ def _target(**kw) -> ta.TargetMetricContext:
     }
     base.update(kw)
     base.setdefault("target_alignment_role", ta.alignment_role(base["target_kind"]))
+    base.setdefault(
+        "target_locked",
+        base["target_kind"] != ta.DIRECT_INPUT_TARGET,
+    )
     return ta.TargetMetricContext(**base)
 
 

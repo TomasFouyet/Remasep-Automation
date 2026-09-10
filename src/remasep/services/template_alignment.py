@@ -267,6 +267,7 @@ class TargetMetricContext:
     column_structure_norm: tuple[str, ...]
     target_kind: str
     target_alignment_role: str
+    target_locked: bool | None  # protection.locked de la celda (None si desconocido)
     has_formula: bool
     formula: str
     is_blank: bool
@@ -459,6 +460,7 @@ def build_target_inventory(
                     column_structure_norm=column_struct,
                     target_kind=kind,
                     target_alignment_role=alignment_role(kind),
+                    target_locked=cell_locked,
                     has_formula=has_formula,
                     formula=raw_formula,
                     is_blank=is_blank,
@@ -687,6 +689,7 @@ class AlignmentRow:
     column_match: str
     section_match: str
     target_alignment_role: str
+    target_locked: bool | None
     target_source_expectation: str
     needs_human_review: bool
 
@@ -975,6 +978,7 @@ def _row(metric, readiness, target: TargetMetricContext, sp: ScoredPair,
         column_match=sp.evidence("COLUMN_PATH"),
         section_match=sp.evidence("SECTION"),
         target_alignment_role=target.target_alignment_role,
+        target_locked=target.target_locked,
         target_source_expectation=target.target_source_expectation,
         needs_human_review=status in (STRONG_MATCH, AMBIGUOUS, CONFLICT)
         or target.target_source_expectation in _NON_MEDINET_EXPECTATIONS,
