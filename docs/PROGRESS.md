@@ -262,6 +262,16 @@ alineación semántica con la plantilla oficial). Para el detalle por sprint ver
   backend → `HumanError` (`ui/errors.py`; detalle técnico sólo al log). Backend,
   reglas REMASEP y `scripts/generate_remasep.py` **sin cambios**. Ver
   [`docs/UI.md`](UI.md).
+  - *Patch de aceptación Windows*: (1) **detección asistida del período** al
+    elegir el Medinet — `detect_medinet_periods` (reusa la validez de
+    `processing_scope_frame`, nunca el nombre del archivo); autoselección si hay
+    un solo mes, aviso si hay varios, "Analizar datos" bloqueado si el mes
+    elegido no está en el archivo. (2) **"Guardar como"** antes de iniciar Excel
+    COM: la ruta de salida se elige en un `QFileDialog` y se pasa explícita a
+    `GenerationService`; sin overwrite silencioso; "Elegir otro nombre" reabre el
+    diálogo sin perder el análisis. (3) warning `QFont setPointSize -1`: reglas
+    QSS con `font-weight` sin `font-size` → añadido `font-size` explícito en 3
+    reglas, sin cambio visual.
 - **3.7+ — dimensiones de actividad / especialidad** y traducción a la tabla
   larga semántica: **pendiente**.
 - **Modelo de *provenance* / `source`**: `MEDINET` se aplica en 3.1–3.3; el delta

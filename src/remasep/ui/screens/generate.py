@@ -10,8 +10,10 @@ from pathlib import Path
 
 from PySide6.QtCore import QThread
 from PySide6.QtWidgets import (
+    QFileDialog,
     QHBoxLayout,
     QLabel,
+    QMessageBox,
     QProgressBar,
     QPushButton,
     QVBoxLayout,
@@ -42,6 +44,7 @@ class GenerateScreen(QWidget):
         self._thread: QThread | None = None
         self._worker: GenerationWorker | None = None
         self._output_path: str | None = None
+        self._last_human: HumanError | None = None
 
         self.steps = StepIndicator(_STEPS)
         self._heading = QLabel("Generando el REMASEP")
@@ -121,17 +124,66 @@ class GenerateScreen(QWidget):
         self.steps.set_current(3)
         self._error.clear()
         self._result_card.setVisible(False)
+        self._progress_card.setVisible(False)
+
+        state = self._app.state
+        # "Guardar como" ANTES de iniciar Excel: si no hay ruta, o la ruta ya
+        # existe (p. ej. una segunda generación del mismo mes), pedirla.
+        if state.output_path is None or Path(state.output_path).exists():
+            target = self._prompt_output_path()
+            if target is None:  # el usuario canceló: volver al Resumen, sin error
+                self._app.navigate("dashboard")
+                return
+            state.output_path = target
+
         self._progress_card.setVisible(True)
         self._heading.setText("Generando el REMASEP")
         self._bar.setValue(0)
         self._status_label.setText("Preparando…")
         self._start()
 
+    def _prompt_output_path(self) -> Path | None:
+        """Diálogo "Guardar informe REMASEP". Devuelve la ruta o ``None`` si se cancela.
+
+        No sobrescribe: si el nombre elegido ya existe, lo explica y vuelve a
+        pedir. Nunca borra archivos existentes.
+        """
+        period = self._app.state.period
+        default_name = f"REMASEP_{period.year:04d}_{period.month:02d}_DRAFT.xlsm"
+        previous = self._app.state.output_path
+        start_dir = previous.parent if previous is not None else Path("outputs")
+        if not start_dir.is_dir():
+            start_dir = Path.home()
+        suggested = str(start_dir / default_name)
+        while True:
+            path, _ = QFileDialog.getSaveFileName(
+                self,
+                "Guardar informe REMASEP",
+                suggested,
+                "Excel con macros (*.xlsm)",
+                options=QFileDialog.Option.DontConfirmOverwrite,
+            )
+            if not path:
+                return None
+            target = Path(path)
+            if target.suffix.lower() != ".xlsm":
+                target = target.with_suffix(".xlsm")
+            if target.exists():
+                QMessageBox.warning(
+                    self,
+                    "Ya existe un archivo",
+                    f"Ya existe un archivo llamado “{target.name}”. Elige otro nombre.",
+                )
+                suggested = str(target.parent / default_name)
+                continue
+            return target
+
     def _start(self) -> None:
         state = self._app.state
+        out = str(state.output_path) if state.output_path is not None else None
         self._thread = QThread(self)
         self._worker = GenerationWorker(
-            state.medinet_path, state.period, state.template_path, None
+            state.medinet_path, state.period, state.template_path, out
         )
         self._worker.moveToThread(self._thread)
         self._thread.started.connect(self._worker.run)
@@ -169,6 +221,7 @@ class GenerateScreen(QWidget):
 
     def _show_error(self, human: HumanError | None) -> None:
         human = human or HumanError("No pudimos generar el informe.", "Vuelve a intentarlo.", "Reintentar")
+        self._last_human = human
         self._progress_card.setVisible(False)
         self._result_card.setVisible(False)
         self._heading.setText("No se pudo generar el informe")
@@ -200,11 +253,16 @@ class GenerateScreen(QWidget):
     # --- acciones -------------------------------------------
 
     def _retry_or_back(self) -> None:
-        human = self._app.state.generation.human_error if self._app.state.generation else None
-        if human and human.action_label.lower().startswith("elegir"):
+        label = (self._last_human.action_label if self._last_human else "").lower()
+        if "nombre" in label:
+            # OUTPUT_ALREADY_EXISTS: reabrir "Guardar como" directamente, sin
+            # perder Medinet / plantilla / período / análisis ya válidos.
+            self._app.state.output_path = None
+            self._app.navigate("generate")
+        elif label.startswith("elegir otro archivo"):
             self._app.navigate("new_report")
-        elif human and human.action_label.lower().startswith("reintentar"):
-            self.on_enter()
+        elif label.startswith("reintentar"):
+            self._app.navigate("generate")
         else:
             self._app.navigate("dashboard")
 
@@ -218,7 +276,13 @@ class GenerateScreen(QWidget):
 
     # --- ruta síncrona para tests --------------------------
 
-    def run_now(self) -> None:
+    def run_now(self, output_path: str | Path | None = None) -> None:
         state = self._app.state
-        outcome = run_generation(state.medinet_path, state.period, state.template_path, None)
+        out = output_path if output_path is not None else state.output_path
+        outcome = run_generation(
+            state.medinet_path,
+            state.period,
+            state.template_path,
+            str(out) if out is not None else None,
+        )
         self._on_done(outcome)

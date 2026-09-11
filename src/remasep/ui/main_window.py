@@ -44,6 +44,7 @@ class AppState:
     year: int
     medinet_path: Path | None = None
     template_path: Path | None = None
+    output_path: Path | None = None
     summary: MonthlyMedinetSummary | None = None
     analysis_error: HumanError | None = None
     generation: GenerationOutcome | None = None

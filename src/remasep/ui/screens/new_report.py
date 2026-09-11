@@ -14,12 +14,15 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from remasep.services.common import month_name
+from remasep.core.errors import RemasepError
+from remasep.services.common import Period, month_name
 from remasep.services.excel_writer import check_template_compatibility
+from remasep.services.medinet_analysis import detect_medinet_periods
 from remasep.services.runtime_assets import RuntimeAssetError, load_runtime_bundle
 from remasep.ui.components.file_selector import FileSelector
 from remasep.ui.components.step_indicator import StepIndicator
 from remasep.ui.components.widgets import Card, SectionHeader
+from remasep.ui.errors import humanize_error
 
 _STEPS = ["Datos", "Análisis", "Resumen", "Informe"]
 _YEARS = list(range(2024, 2031))
@@ -39,6 +42,11 @@ class NewReportScreen(QWidget):
     def __init__(self, app: QWidget) -> None:
         super().__init__()
         self._app = app
+        # Períodos (mes/año) presentes en el archivo Medinet elegido.
+        #   None  -> aún no se detectó / no se pudo leer (no bloquea; se revalida al analizar)
+        #   ()    -> archivo leído pero sin ninguna cita con fecha válida (bloquea)
+        #   (...) -> períodos reales disponibles
+        self._available_periods: tuple[Period, ...] | None = None
 
         self.steps = StepIndicator(_STEPS)
         heading = QLabel("Nuevo informe mensual")
@@ -81,7 +89,7 @@ class NewReportScreen(QWidget):
             extensions=["xlsm"],
             hint="Archivo oficial REMASEP (.xlsm) sobre el que se escribirá el informe.",
         )
-        self.medinet_selector.fileSelected.connect(self._sync_state)
+        self.medinet_selector.fileSelected.connect(self._on_medinet_selected)
         self.template_selector.fileSelected.connect(self._on_template_selected)
 
         # --- acciones ---
@@ -114,12 +122,73 @@ class NewReportScreen(QWidget):
     def on_enter(self) -> None:
         self.steps.set_current(0)
         state = self._app.state
+        self._apply_period(Period(state.month, state.year))
+        if self.medinet_selector.path is None:
+            self._available_periods = None
+        self._sync_state()
+
+    def _apply_period(self, period: Period) -> None:
+        """Fija mes/año en los selectores sin disparar señales."""
         self.month_combo.blockSignals(True)
         self.year_spin.blockSignals(True)
-        self.month_combo.setCurrentIndex(state.month - 1)
-        self.year_spin.setValue(state.year)
+        self.month_combo.setCurrentIndex(period.month - 1)
+        self.year_spin.setValue(period.year)
         self.month_combo.blockSignals(False)
         self.year_spin.blockSignals(False)
+
+    def _on_medinet_selected(self, *_args: object) -> None:
+        """Detección asistida del período al elegir el archivo Medinet.
+
+        Un export puede contener varios meses; el período real se obtiene de las
+        fechas de cita, nunca del nombre del archivo.
+        """
+        self._available_periods = None
+        path = self.medinet_selector.path
+        if path is None or not self.medinet_selector.has_valid_extension:
+            self._sync_state()
+            return
+
+        try:
+            periods = detect_medinet_periods(Path(path))
+        except RemasepError as exc:
+            self.medinet_selector.set_status(humanize_error(exc).title, status="warning")
+            self._sync_state()
+            return
+        except Exception:  # noqa: BLE001 - se revalida al analizar; nunca crashear aquí
+            self.medinet_selector.set_status(
+                "No pudimos leer los períodos del archivo ahora; se revisará al analizar.",
+                status="warning",
+            )
+            self._sync_state()
+            return
+
+        self._available_periods = tuple(periods)
+        if not periods:
+            self.medinet_selector.set_status(
+                "No encontramos citas con fecha válida en este archivo.",
+                status="warning",
+            )
+            self._sync_state()
+            return
+
+        current = Period(self.month_combo.currentData(), self.year_spin.value())
+        if len(periods) == 1:
+            self._apply_period(periods[0])
+            self.medinet_selector.set_status(
+                f"✓  Período detectado: {periods[0].label}", status="ok"
+            )
+        elif current in periods:
+            self.medinet_selector.set_status(
+                f"El archivo contiene {len(periods)} períodos. "
+                f"Se procesará {current.label} (puedes cambiarlo).",
+                status="ok",
+            )
+        else:
+            self._apply_period(periods[-1])  # más reciente: elección determinista
+            self.medinet_selector.set_status(
+                "El archivo contiene varios períodos. Confirma el mes que deseas procesar.",
+                status="warning",
+            )
         self._sync_state()
 
     def _sync_state(self, *_args: object) -> None:
@@ -128,10 +197,24 @@ class NewReportScreen(QWidget):
         state.year = self.year_spin.value()
         state.medinet_path = self.medinet_selector.path
         state.template_path = self.template_selector.path
-        self.analyze_button.setEnabled(
+
+        files_ok = (
             self.medinet_selector.has_valid_extension
             and self.template_selector.has_valid_extension
         )
+        period_ok = True
+        if self._available_periods:  # tupla no vacía: hay períodos conocidos
+            chosen = Period(state.month, state.year)
+            period_ok = chosen in self._available_periods
+            if not period_ok and self.medinet_selector.has_valid_extension:
+                self.medinet_selector.set_status(
+                    f"No encontramos citas de {chosen.label} en este archivo.",
+                    status="warning",
+                )
+        elif self._available_periods == ():  # archivo leído, sin fechas válidas
+            period_ok = False
+
+        self.analyze_button.setEnabled(files_ok and period_ok)
 
     def _on_template_selected(self, *_args: object) -> None:
         self._sync_state()

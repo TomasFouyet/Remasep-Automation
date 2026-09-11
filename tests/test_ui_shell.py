@@ -82,7 +82,9 @@ def _run_analysis(window) -> None:
     window.screens["analysis"].run_now()          # ejecución síncrona (idempotente)
 
 
-def _run_generate(window) -> None:
+def _run_generate(window, out_path) -> None:
+    # ruta de salida ya elegida (equivale a haber pasado por "Guardar como")
+    window.state.output_path = Path(out_path)
     window.navigate("generate")                    # on_enter arranca el hilo
     window.screens["generate"]._teardown()
     _drain()
@@ -171,11 +173,90 @@ def test_file_selector_flags_wrong_extension(window, tmp_path):
     assert not nr.analyze_button.isEnabled()
 
 
-def test_period_selection_persists_into_state(window, medinet_file, template_file):
+def test_period_selection_persists_into_state(window, make_medinet, template_file):
+    # el período se autodetecta desde el archivo y persiste en el estado
+    f = make_medinet([_row(dia=date(2027, 3, 15)) for _ in range(2)])
     window.navigate("new_report")
-    _fill_new_report(window, medinet_file, template_file, month=3, year=2027)
+    nr = window.screens["new_report"]
+    nr.medinet_selector.set_selection(Path(f))
+    nr.template_selector.set_selection(Path(template_file))
+    nr._sync_state()
     assert (window.state.month, window.state.year) == (3, 2027)
     assert window.state.period == Period(3, 2027)
+
+
+# ---------------------------------------------------------------------------
+# Detección asistida del período (Problema 1)
+# ---------------------------------------------------------------------------
+
+
+def test_medinet_single_period_is_autodetected(window, make_medinet):
+    f = make_medinet([_row(dia=date(2026, 5, 4)) for _ in range(3)])
+    window.navigate("new_report")
+    nr = window.screens["new_report"]
+    nr.month_combo.setCurrentIndex(0)          # Enero (a propósito, distinto)
+    nr.year_spin.setValue(2026)
+    nr.medinet_selector.set_selection(Path(f))
+    assert (window.state.month, window.state.year) == (5, 2026)   # -> Mayo
+    assert "Período detectado" in nr.medinet_selector._status_label.text()
+
+
+def test_medinet_multiple_periods_keeps_valid_current(window, make_medinet):
+    f = make_medinet([
+        _row(dia=date(2026, 7, 10)), _row(dia=date(2026, 8, 10)), _row(dia=date(2026, 8, 11)),
+    ])
+    window.navigate("new_report")
+    nr = window.screens["new_report"]
+    nr.month_combo.setCurrentIndex(7)          # Agosto: presente en el archivo
+    nr.year_spin.setValue(2026)
+    nr.medinet_selector.set_selection(Path(f))
+    assert (window.state.month, window.state.year) == (8, 2026)   # se conserva
+    assert "períodos" in nr.medinet_selector._status_label.text().lower()
+
+
+def test_medinet_multiple_periods_absent_current_picks_deterministic(window, make_medinet):
+    f = make_medinet([_row(dia=date(2026, 7, 10)), _row(dia=date(2026, 8, 10))])
+    window.navigate("new_report")
+    nr = window.screens["new_report"]
+    nr.month_combo.setCurrentIndex(0)          # Enero: ausente
+    nr.year_spin.setValue(2026)
+    nr.medinet_selector.set_selection(Path(f))
+    assert (window.state.month, window.state.year) == (8, 2026)   # más reciente, determinista
+    assert "Confirma el mes" in nr.medinet_selector._status_label.text()
+
+
+def test_analyze_blocked_when_chosen_period_absent_from_file(window, make_medinet, template_file):
+    f = make_medinet([_row(dia=date(2026, 7, 10))])
+    window.navigate("new_report")
+    nr = window.screens["new_report"]
+    nr.medinet_selector.set_selection(Path(f))
+    nr.template_selector.set_selection(Path(template_file))
+    nr.month_combo.setCurrentIndex(0)          # fuerza Enero 2025: no está
+    nr.year_spin.setValue(2025)
+    nr._sync_state()
+    assert not nr.analyze_button.isEnabled()
+    assert "No encontramos citas de Enero 2025" in nr.medinet_selector._status_label.text()
+
+
+def test_medinet_without_valid_dates_blocks_analysis(window, make_medinet, template_file):
+    f = make_medinet([_row(dia="") for _ in range(2)])
+    window.navigate("new_report")
+    nr = window.screens["new_report"]
+    nr.medinet_selector.set_selection(Path(f))
+    nr.template_selector.set_selection(Path(template_file))
+    assert not nr.analyze_button.isEnabled()
+    assert nr.medinet_selector._status_label.text()        # mensaje humano
+    assert "Traceback" not in nr.medinet_selector._status_label.text()
+
+
+def test_period_detection_ignores_filename(window, make_medinet, tmp_path):
+    src = make_medinet([_row(dia=date(2026, 8, 10)) for _ in range(2)])
+    misleading = tmp_path / "detalle_citas_2099-01.xlsx"
+    misleading.write_bytes(Path(src).read_bytes())
+    window.navigate("new_report")
+    nr = window.screens["new_report"]
+    nr.medinet_selector.set_selection(misleading)
+    assert (window.state.month, window.state.year) == (8, 2026)   # datos, no nombre
 
 
 # ---------------------------------------------------------------------------
@@ -243,7 +324,15 @@ def test_dashboard_without_summary_returns_to_new_report(window):
 # ---------------------------------------------------------------------------
 
 
-def test_generate_calls_the_generation_service(window, medinet_file, template_file, monkeypatch):
+def _ok_outcome(path="outputs/REMASEP_2026_07_DRAFT.xlsm"):
+    return GenerationOutcome(
+        ok=True, status="GENERATED_DRAFT", submission_label="NOT_FOR_SUBMISSION",
+        output_path=path, written_cells=1122, considered_records=24, integrity_ok=True,
+        control_status="PASS_INTERNAL_VALIDATION", warnings=(),
+    )
+
+
+def test_generate_calls_the_generation_service(window, medinet_file, template_file, tmp_path, monkeypatch):
     window.navigate("new_report")
     _fill_new_report(window, medinet_file, template_file)
     _run_analysis(window)
@@ -252,20 +341,17 @@ def test_generate_calls_the_generation_service(window, medinet_file, template_fi
 
     def fake_run_generation(medinet, period, template, output, **_kw):
         calls["args"] = (Path(medinet).name, period, Path(template).name, output)
-        return GenerationOutcome(
-            ok=True, status="GENERATED_DRAFT", submission_label="NOT_FOR_SUBMISSION",
-            output_path="outputs/REMASEP_2026_07_DRAFT.xlsm", written_cells=1122,
-            considered_records=24, integrity_ok=True,
-            control_status="PASS_INTERNAL_VALIDATION", warnings=(),
-        )
+        return _ok_outcome()
 
     monkeypatch.setattr("remasep.ui.workers.run_generation", fake_run_generation)
     monkeypatch.setattr("remasep.ui.screens.generate.run_generation", fake_run_generation)
-    _run_generate(window)
+    out = tmp_path / "REMASEP_elegido.xlsm"
+    _run_generate(window, out)
 
     assert calls["args"][0] == Path(medinet_file).name
     assert calls["args"][1] == Period(7, 2026)
     assert calls["args"][2] == Path(template_file).name
+    assert calls["args"][3] == str(out)          # la ruta elegida se pasa explícita
 
     gen = window.screens["generate"]
     assert gen._result_card.isVisible()
@@ -277,7 +363,7 @@ def test_generate_calls_the_generation_service(window, medinet_file, template_fi
     assert "requerir información adicional" in txt  # aviso NOT_FOR_SUBMISSION
 
 
-def test_generate_backend_error_shows_human_message(window, medinet_file, template_file, monkeypatch):
+def test_generate_backend_error_shows_human_message(window, medinet_file, template_file, tmp_path, monkeypatch):
     window.navigate("new_report")
     _fill_new_report(window, medinet_file, template_file)
     _run_analysis(window)
@@ -295,7 +381,7 @@ def test_generate_backend_error_shows_human_message(window, medinet_file, templa
 
     monkeypatch.setattr("remasep.ui.workers.run_generation", failing)
     monkeypatch.setattr("remasep.ui.screens.generate.run_generation", failing)
-    _run_generate(window)
+    _run_generate(window, tmp_path / "REMASEP_err.xlsm")
 
     gen = window.screens["generate"]
     assert not gen._result_card.isVisible()
@@ -303,6 +389,120 @@ def test_generate_backend_error_shows_human_message(window, medinet_file, templa
     assert "Microsoft Excel" in gen._error._title.text()
     assert "Traceback" not in gen._error._detail.text()
     assert window.state.generation is not None and window.state.generation.ok is False
+
+
+# ---------------------------------------------------------------------------
+# "Guardar como" antes de generar (Problema 2)
+# ---------------------------------------------------------------------------
+
+
+def test_generate_prompts_save_as_and_passes_chosen_path(
+    window, medinet_file, template_file, tmp_path, monkeypatch
+):
+    window.navigate("new_report")
+    _fill_new_report(window, medinet_file, template_file)
+    _run_analysis(window)
+
+    chosen = tmp_path / "carpeta" / "MI_REMASEP.xlsm"
+    chosen.parent.mkdir()
+    monkeypatch.setattr(
+        "remasep.ui.screens.generate.QFileDialog.getSaveFileName",
+        lambda *a, **k: (str(chosen), ""),
+    )
+    got = {}
+
+    def fake(medinet, period, template, output, **_kw):
+        got["out"] = output
+        return _ok_outcome(path=str(chosen))
+
+    monkeypatch.setattr("remasep.ui.workers.run_generation", fake)
+    monkeypatch.setattr("remasep.ui.screens.generate.run_generation", fake)
+
+    window.state.output_path = None                 # fuerza el diálogo "Guardar como"
+    window.navigate("generate")                     # on_enter -> getSaveFileName (mock) -> hilo
+    window.screens["generate"]._teardown()
+    _drain()
+    window.screens["generate"].run_now()
+
+    assert window.state.output_path == chosen
+    assert got["out"] == str(chosen)
+    assert window.screens["generate"]._result_card.isVisible()
+
+
+def test_generate_save_as_cancel_returns_to_dashboard_without_error(
+    window, medinet_file, template_file, monkeypatch
+):
+    window.navigate("new_report")
+    _fill_new_report(window, medinet_file, template_file)
+    _run_analysis(window)
+
+    monkeypatch.setattr(
+        "remasep.ui.screens.generate.QFileDialog.getSaveFileName",
+        lambda *a, **k: ("", ""),                   # el usuario cancela
+    )
+    calls = {"n": 0}
+
+    def fake(*_a, **_kw):
+        calls["n"] += 1
+        return _ok_outcome()
+
+    monkeypatch.setattr("remasep.ui.workers.run_generation", fake)
+    monkeypatch.setattr("remasep.ui.screens.generate.run_generation", fake)
+
+    window.state.output_path = None
+    window.navigate("generate")
+    _drain()
+
+    assert window.current_screen_name == "dashboard"    # vuelve al Resumen
+    assert calls["n"] == 0                               # no se generó nada
+    assert not window.screens["generate"]._error.isVisible()
+    assert window.state.summary is not None             # el dashboard sigue vivo
+
+
+def test_output_exists_retry_reopens_save_as_not_new_report(
+    window, medinet_file, template_file, tmp_path, monkeypatch
+):
+    window.navigate("new_report")
+    _fill_new_report(window, medinet_file, template_file)
+    _run_analysis(window)
+
+    good = tmp_path / "REMASEP_ok.xlsm"
+    reopened = {"n": 0}
+
+    def fake_dialog(*_a, **_k):
+        reopened["n"] += 1
+        return (str(good), "")
+
+    monkeypatch.setattr(
+        "remasep.ui.screens.generate.QFileDialog.getSaveFileName", fake_dialog
+    )
+    monkeypatch.setattr(
+        "remasep.ui.workers.run_generation", lambda *a, **k: _ok_outcome(str(good))
+    )
+    monkeypatch.setattr(
+        "remasep.ui.screens.generate.run_generation", lambda *a, **k: _ok_outcome(str(good))
+    )
+
+    gen = window.screens["generate"]
+    # simula que la generación devolvió OUTPUT_ALREADY_EXISTS
+    from remasep.services.excel_writer import STATUS_OUTPUT_EXISTS
+    from remasep.ui.errors import humanize_generation_status
+
+    window.state.generation = GenerationOutcome(
+        ok=False, status=STATUS_OUTPUT_EXISTS, submission_label="", output_path=None,
+        written_cells=0, considered_records=24, integrity_ok=False, control_status="",
+        warnings=(), human_error=humanize_generation_status(STATUS_OUTPUT_EXISTS),
+    )
+    gen._show_error(window.state.generation.human_error)
+    assert "nombre" in gen._error._action.text().lower()
+
+    gen._retry_or_back()                # botón "Elegir otro nombre"
+    window.screens["generate"]._teardown()
+    _drain()
+
+    assert reopened["n"] >= 1                       # reabrió "Guardar como"
+    assert window.current_screen_name == "generate"  # NO fue a "Nuevo informe"
+    assert window.state.output_path == good
 
 
 def test_run_generation_is_graceful_without_excel(medinet_file):

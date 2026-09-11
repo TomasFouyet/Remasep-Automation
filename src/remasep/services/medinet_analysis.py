@@ -41,6 +41,7 @@ __all__ = [
     "MedinetAnalysisResult",
     "MedinetAnalysisService",
     "RecordProblem",
+    "detect_medinet_periods",
     "legacy_age_years",
     "structural_empty_mask",
 ]
@@ -246,6 +247,27 @@ def processing_scope_frame(
     medinet = read_medinet(path, sheet_name=sheet_name)
     selection = _scope_selection(medinet, period)
     return medinet.frame.loc[selection.scope_mask].reset_index(drop=True)
+
+
+def detect_medinet_periods(
+    path: str | Path, *, sheet_name: str | int | None = None
+) -> list[Period]:
+    """Períodos (mes/año) con al menos una cita **estructuralmente válida** en el archivo.
+
+    Devuelto en orden cronológico. Un export Medinet puede traer varios meses:
+    esta función **no** asume un único período y **no** usa el nombre del archivo
+    — los períodos se derivan de ``DIA_CITA``. Reutiliza :func:`read_medinet` y
+    exactamente la misma noción de validez estructural que
+    :func:`processing_scope_frame`; ``processing_scope_frame`` sigue siendo la
+    autoridad al procesar.
+    """
+    medinet = read_medinet(path, sheet_name=sheet_name)
+    # El período es irrelevante aquí: sólo se usa ``valid_mask``, que no depende
+    # del mes/año. ``scope_mask`` (sí dependiente) se ignora.
+    selection = _scope_selection(medinet, Period(1, 1900))
+    dia = medinet.frame.loc[selection.valid_mask, "DIA_CITA"].dropna()
+    pairs = sorted({(int(ts.year), int(ts.month)) for ts in dia})
+    return [Period(month, year) for year, month in pairs]
 
 
 def _iso_date(value: object) -> str | None:

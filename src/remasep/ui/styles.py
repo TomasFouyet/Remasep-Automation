@@ -127,6 +127,7 @@ QPushButton[variant="primary"] {{
     background: {THEME.primary};
     border: 1px solid {THEME.primary};
     color: #ffffff;
+    font-size: 14px;
     font-weight: 600;
     padding: 11px 22px;
 }}
@@ -159,9 +160,9 @@ QProgressBar {{
 }}
 QProgressBar::chunk {{ background: {THEME.primary}; border-radius: 6px; }}
 
-QLabel#stepActive   {{ background: {THEME.primary};      color: #ffffff; border-radius: 13px; padding: 4px 12px; font-weight: 600; }}
-QLabel#stepInactive {{ background: {THEME.surface_muted}; color: {THEME.text_faint}; border: 1px solid {THEME.border}; border-radius: 13px; padding: 4px 12px; }}
-QLabel#stepDone     {{ background: {THEME.ok_soft};      color: {THEME.ok};      border-radius: 13px; padding: 4px 12px; font-weight: 600; }}
+QLabel#stepActive   {{ background: {THEME.primary};      color: #ffffff; border-radius: 13px; padding: 4px 12px; font-size: 14px; font-weight: 600; }}
+QLabel#stepInactive {{ background: {THEME.surface_muted}; color: {THEME.text_faint}; border: 1px solid {THEME.border}; border-radius: 13px; padding: 4px 12px; font-size: 14px; }}
+QLabel#stepDone     {{ background: {THEME.ok_soft};      color: {THEME.ok};      border-radius: 13px; padding: 4px 12px; font-size: 14px; font-weight: 600; }}
 """
 
 

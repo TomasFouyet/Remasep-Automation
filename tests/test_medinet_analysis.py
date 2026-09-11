@@ -18,6 +18,7 @@ from remasep.services.legacy_transform import legacy_derived_value
 from remasep.services.medinet_analysis import (
     ANALYSIS_MODE_REAL,
     MedinetAnalysisService,
+    detect_medinet_periods,
     legacy_age_years,
     processing_scope_frame,
 )
@@ -580,6 +581,55 @@ def test_processing_scope_frame_excludes_out_of_period_rows(make_medinet):
     assert len(frame) == 1
     assert frame["DIA_CITA"].dt.month.eq(8).all()
     assert frame["DIA_CITA"].dt.year.eq(2026).all()
+
+
+def test_detect_periods_single(make_medinet):
+    path = make_medinet([_row(dia=date(2026, 8, 3)), _row(dia=date(2026, 8, 20))])
+    assert detect_medinet_periods(path) == [Period(8, 2026)]
+
+
+def test_detect_periods_multiple_are_sorted_chronologically(make_medinet):
+    path = make_medinet(
+        [
+            _row(dia=date(2026, 8, 25)),
+            _row(dia=date(2026, 6, 30)),
+            _row(dia=date(2026, 7, 10)),
+            _row(dia=date(2026, 8, 2)),
+        ]
+    )
+    assert detect_medinet_periods(path) == [Period(6, 2026), Period(7, 2026), Period(8, 2026)]
+
+
+def test_detect_periods_ignores_structurally_invalid_rows(make_medinet):
+    # la fila de septiembre no tiene SEXO -> inválida -> su fecha no cuenta
+    path = make_medinet([_row(dia=date(2026, 8, 1)), _row(dia=date(2026, 9, 1), sexo="")])
+    assert detect_medinet_periods(path) == [Period(8, 2026)]
+
+
+def test_detect_periods_no_valid_dates_returns_empty(make_medinet):
+    path = make_medinet([_row(dia=""), _row(dia="no-es-fecha")])
+    assert detect_medinet_periods(path) == []
+
+
+def test_detect_periods_bad_file_raises_source_validation(tmp_path):
+    bad = tmp_path / "x.xlsx"
+    bad.write_text("no soy un excel")
+    with pytest.raises(SourceValidationError):
+        detect_medinet_periods(bad)
+
+
+def test_detect_periods_uses_data_not_filename(make_medinet, tmp_path):
+    src = make_medinet([_row(dia=date(2026, 8, 10))])
+    misleading = tmp_path / "detalle_2099-01.xlsx"
+    misleading.write_bytes(src.read_bytes())
+    assert detect_medinet_periods(misleading) == [Period(8, 2026)]
+
+
+def test_detect_periods_matches_processing_scope_authority(make_medinet):
+    rows = [_row(dia=date(2026, 8, 5)), _row(dia=date(2026, 9, 5)), _row(dia=date(2026, 8, 20))]
+    path = make_medinet(rows)
+    for period in detect_medinet_periods(path):
+        assert len(processing_scope_frame(path, period)) >= 1
 
 
 def test_legacy_rules_config_is_flagged_pending():
