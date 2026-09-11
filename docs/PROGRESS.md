@@ -246,6 +246,32 @@ alineación semántica con la plantilla oficial). Para el detalle por sprint ver
     del runtime bundle = **`CONFIRMED`**. (El del Sprint 3.6 sigue
     `PENDING_FUNCTIONAL_CONFIRMATION` a propósito: otra capa.) Ver
     [`docs/MEDINET_ESTADO_AUDIT.md`](MEDINET_ESTADO_AUDIT.md).
+- **3.10 — UI profesional MEDINET + resumen mensual: ✅ COMPLETE.**
+  Flujo de escritorio sin terminal: Inicio → Nuevo informe (período + archivo
+  Medinet + plantilla REMASEP con validación de fingerprint) → Análisis
+  (progreso comprensible, sin logs) → **Resumen mensual Medinet** → Generar →
+  Resultado (Abrir Excel / Abrir carpeta). Modelo
+  `services/medinet_summary.py::MonthlyMedinetSummary` = **adaptador de sólo
+  lectura** sobre `processing_scope_frame` + `apply_estado_filter` (regla ESTADO
+  3.9); julio 2026 reproduce **exacto** el pipeline (2 114 / 1 364 / 750 /
+  64,5 %). 4 KPIs + 4 gráficos agregados **sin PII** (ESTADO, especialidad, sexo,
+  edad; `PRESTACIÓN` descartada por 302/1 364 vacías). Export **PDF** de una
+  página con `QPdfWriter`/`QPainter` (sin WebEngine; `report_content` separado del
+  pintado; sin sobrescritura silenciosa). Generación vía `GenerationService`
+  (`ui/workers.py::run_generation`, función pura; *graceful* sin Excel). Errores
+  backend → `HumanError` (`ui/errors.py`; detalle técnico sólo al log). Backend,
+  reglas REMASEP y `scripts/generate_remasep.py` **sin cambios**. Ver
+  [`docs/UI.md`](UI.md).
+  - *Patch de aceptación Windows*: (1) **detección asistida del período** al
+    elegir el Medinet — `detect_medinet_periods` (reusa la validez de
+    `processing_scope_frame`, nunca el nombre del archivo); autoselección si hay
+    un solo mes, aviso si hay varios, "Analizar datos" bloqueado si el mes
+    elegido no está en el archivo. (2) **"Guardar como"** antes de iniciar Excel
+    COM: la ruta de salida se elige en un `QFileDialog` y se pasa explícita a
+    `GenerationService`; sin overwrite silencioso; "Elegir otro nombre" reabre el
+    diálogo sin perder el análisis. (3) warning `QFont setPointSize -1`: reglas
+    QSS con `font-weight` sin `font-size` → añadido `font-size` explícito en 3
+    reglas, sin cambio visual.
 - **3.7+ — dimensiones de actividad / especialidad** y traducción a la tabla
   larga semántica: **pendiente**.
 - **Modelo de *provenance* / `source`**: `MEDINET` se aplica en 3.1–3.3; el delta
