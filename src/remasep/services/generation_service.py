@@ -101,8 +101,11 @@ class GenerationService:
         return yaml.safe_load(path.read_text(encoding="utf-8")) or {}
 
     def _control_map(self, policy: dict) -> ControlMap:
-        rel = policy.get("control_map") or str(self._config_dir / "control_map.yaml")
-        path = Path(rel)
+        # ``control_map`` en policy.yaml es relativo a config_dir (nunca al cwd
+        # del proceso); una ruta absoluta (si alguna vez hiciera falta) se
+        # respeta tal cual.
+        rel = Path(policy.get("control_map") or "control_map.yaml")
+        path = rel if rel.is_absolute() else self._config_dir / rel
         if not path.is_file():
             raise GenerationServiceError(f"falta el mapa de CONTROL: {path}")
         return load_control_map(yaml.safe_load(path.read_text(encoding="utf-8")) or {})

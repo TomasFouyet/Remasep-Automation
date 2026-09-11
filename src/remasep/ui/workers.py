@@ -84,9 +84,13 @@ def run_generation(
     Reutiliza el pipeline validado; no reimplementa nada. En Linux/sin Excel
     devuelve ``ok=False`` con un ``HumanError`` legible (no lanza).
     """
+    from remasep import app_paths
     from remasep.services.runtime_assets import load_runtime_bundle
 
-    service = service or GenerationService()
+    service = service or GenerationService(
+        config_dir=app_paths.excel_writer_config_dir(),
+        artifacts_dir=app_paths.diagnostics_dir(),
+    )
     bundle = load_runtime_bundle()
     production = build_production_pending_writes(medinet_path, period, bundle=bundle)
     if production.run.value_type_conflicts or production.run.unsupported:

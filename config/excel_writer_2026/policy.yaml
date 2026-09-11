@@ -62,7 +62,9 @@ output:
   final_name_template: "REMASEP_{year}_{month:02d}.xlsm"
 
 # --- CONTROL --------------------------------------------------------
-control_map: config/excel_writer_2026/control_map.yaml
+# Relativo a este mismo directorio (config/excel_writer_2026/), nunca al cwd
+# del proceso — GenerationService lo resuelve contra su config_dir.
+control_map: control_map.yaml
 # En la primera generación sólo-MEDINET NO se exige CONTROL == 0: la plantilla
 # también necesita EGRESOS / recursos / tabla quirúrgica / metadatos que aún no
 # producimos. writer_integrity_status es independiente de control_status.

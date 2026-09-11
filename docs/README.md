@@ -129,7 +129,22 @@
   pipeline validado, sin PII), export a **PDF** de una página con
   `QPdfWriter`/`QPainter` (sin WebEngine), generación del REMASEP vía
   `GenerationService`, y mapeo de errores backend → mensajes humanos. La UI ya
-  **está conectada** al backend; el CLI sigue igual.
+  **está conectada** al backend; el CLI sigue igual. Patch de aceptación
+  (período detectado automáticamente al elegir el Medinet + "Guardar como"
+  antes de iniciar Excel COM) documentado en el mismo archivo.
+
+## Empaquetado Windows
+
+- [`WINDOWS_PACKAGING.md`](WINDOWS_PACKAGING.md) — Sprint 3.11: primer `.exe`
+  Windows piloto con PyInstaller **ONEDIR**. Auditoría de paths
+  (`INTERNAL_READ_ONLY` vs `APP_WRITABLE_DATA` vs elegidos por la persona
+  usuaria), `app_paths.py` (assets internos vía `sys._MEIPASS`, datos propios
+  bajo `%LOCALAPPDATA%\REMASEP Automation\`), logging a archivo con rotación,
+  `.spec` + script de build + smoke test del dist, tests de resolución de
+  paths (cwd distinto, MEIPASS simulado, rutas con espacios/Unicode).
+- [`WINDOWS_PILOT.md`](WINDOWS_PILOT.md) — guía para la persona usuaria del
+  piloto: abrir el `.exe`, generar el informe del mes. Sin Python/pip/venv/
+  terminal.
 
 ## Sprints
 

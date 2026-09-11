@@ -58,6 +58,19 @@ def test_resolve_runtime_root_is_not_cwd_dependent(tmp_path, monkeypatch):
     assert root.name == "runtime_2026"
 
 
+def test_resolve_runtime_root_uses_meipass_bundle_when_frozen(tmp_path, monkeypatch):
+    """Simula un build PyInstaller: sys._MEIPASS apunta al bundle onedir."""
+    bundle_root = tmp_path / "_internal"
+    target = bundle_root / "config" / "runtime_2026"
+    target.mkdir(parents=True)
+    (target / "bundle.yaml").write_text("version: fake\n", encoding="utf-8")
+
+    monkeypatch.setattr("sys._MEIPASS", str(bundle_root), raising=False)
+    monkeypatch.chdir(tmp_path)
+    root = resolve_runtime_root()
+    assert root == target
+
+
 def test_bundle_exposes_producer_interfaces():
     bundle = load_runtime_bundle(_REAL_ROOT)
     resolvers = bundle.resolver_by_sheet()

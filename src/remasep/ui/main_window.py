@@ -15,7 +15,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from PySide6.QtWidgets import QApplication, QMainWindow, QStackedWidget, QWidget
+from PySide6.QtWidgets import QApplication, QMainWindow, QMessageBox, QStackedWidget, QWidget
 
 from remasep.services.common import Period
 from remasep.services.medinet_summary import MonthlyMedinetSummary
@@ -110,8 +110,27 @@ class MainWindow(QMainWindow):
 
 
 def run_app() -> None:  # pragma: no cover - punto de entrada
+    from remasep import app_paths
+    from remasep.logging_setup import configure_logging
+
+    log = configure_logging()
     app = QApplication.instance() or QApplication(sys.argv or ["remasep"])
     app.setApplicationName(APP_NAME)
-    window = MainWindow()
-    window.show()
-    app.exec()
+    try:
+        window = MainWindow()
+        window.show()
+        app.exec()
+    except Exception:
+        # Nunca traceback/consola para la persona usuaria: se deja evidencia
+        # técnica en el log local y, si alcanza a haber UI, un aviso humano.
+        log.exception("Fallo inesperado al iniciar o ejecutar REMASEP Automation")
+        try:
+            QMessageBox.critical(
+                None,
+                APP_NAME,
+                "Ocurrió un problema inesperado y la aplicación debe cerrarse.\n"
+                f"Detalle técnico guardado en:\n{app_paths.logs_dir() / 'remasep.log'}",
+            )
+        except Exception:  # noqa: BLE001, S110 - el aviso es un extra, nunca bloquear el cierre
+            pass
+        raise
