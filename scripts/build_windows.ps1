@@ -7,7 +7,7 @@
     .exe). No requiere privilegios de administrador. No toca Excel, no mata
     procesos, no borra carpetas fuera de dist/build de este proyecto.
 
-.PARAMETER Debug
+.PARAMETER DebugBuild
     Construye la variante con consola (packaging/remasep_debug.spec) para
     diagnosticar errores de arranque, en vez de la variante windowed de
     piloto.
@@ -16,12 +16,12 @@
     .\scripts\build_windows.ps1
 
 .EXAMPLE
-    .\scripts\build_windows.ps1 -Debug
+    .\scripts\build_windows.ps1 -DebugBuild
 #>
 
 [CmdletBinding()]
 param(
-    [switch]$Debug
+    [switch]$DebugBuild
 )
 
 $ErrorActionPreference = "Stop"
@@ -66,8 +66,8 @@ foreach ($dir in @($DistDir, $BuildDir)) {
 }
 
 # --- 4. ejecutar PyInstaller con el spec versionado -------------------------
-$SpecFile = if ($Debug) { "packaging\remasep_debug.spec" } else { "packaging\remasep.spec" }
-$DistName = if ($Debug) { "REMASEP-debug" } else { "REMASEP" }
+$SpecFile = if ($DebugBuild) { "packaging\remasep_debug.spec" } else { "packaging\remasep.spec" }
+$DistName = if ($DebugBuild) { "REMASEP-debug" } else { "REMASEP" }
 
 Write-Host "Construyendo con $SpecFile ..."
 & $VenvPython -m PyInstaller $SpecFile --noconfirm --distpath dist --workpath build
