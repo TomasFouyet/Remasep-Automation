@@ -28,6 +28,10 @@ def _make_good_dist(tmp_path):
     (writer / "policy.yaml").write_text("version: fake\n", encoding="utf-8")
     (writer / "control_map.yaml").write_text("sheet: CONTROL\n", encoding="utf-8")
 
+    legacy = internal / "config" / "legacy_current_logic_2026"
+    legacy.mkdir(parents=True)
+    (legacy / "rules.yaml").write_text("version: fake\ncategories: []\n", encoding="utf-8")
+
     # algo de "peso" normal de un build real (dlls, pyd, etc.)
     (internal / "PySide6" / "QtCore.pyd").parent.mkdir(parents=True, exist_ok=True)
     (internal / "PySide6" / "QtCore.pyd").write_bytes(b"\x00")
@@ -54,6 +58,15 @@ def test_check_dist_fails_when_runtime_config_missing(tmp_path):
     (dist / "_internal" / "config" / "runtime_2026" / "bundle.yaml").unlink()
     result = bst.check_dist(dist)
     assert not result.ok
+
+
+def test_check_dist_fails_when_legacy_rules_missing(tmp_path):
+    dist = _make_good_dist(tmp_path)
+    (dist / "_internal" / "config" / "legacy_current_logic_2026" / "rules.yaml").unlink()
+    result = bst.check_dist(dist)
+    assert not result.ok
+    names_failed = {name for name, ok, _ in result.checks if not ok}
+    assert "presente: _internal/config/legacy_current_logic_2026/rules.yaml" in names_failed
 
 
 def test_check_dist_fails_when_excel_writer_config_missing(tmp_path):

@@ -2,9 +2,10 @@
 
 ``--smoke-mode`` (Sprint 3.11, Fase 10) verifica en segundos que el build
 puede arrancar — assets internos resueltos, política del writer legible,
-``user_data_dir`` escribible — **sin** abrir ninguna ventana ni tocar Excel
-COM. Pensado para probar un ``dist/REMASEP/`` recién construido (sobre todo
-la variante debug/consola, donde la salida es visible).
+reglas legacy productivas legibles, ``user_data_dir`` escribible — **sin**
+abrir ninguna ventana ni tocar Excel COM. Pensado para probar un
+``dist/REMASEP/`` recién construido (sobre todo la variante debug/consola,
+donde la salida es visible).
 """
 
 from __future__ import annotations
@@ -25,6 +26,7 @@ def _smoke_check() -> int:
     from remasep import app_paths
     from remasep.logging_setup import configure_logging
     from remasep.services.generation_service import GenerationService
+    from remasep.services.legacy_rules import load_legacy_rules
     from remasep.services.runtime_assets import load_runtime_bundle
 
     log = configure_logging()
@@ -44,12 +46,19 @@ def _smoke_check() -> int:
         f"fingerprint={bundle.template_fingerprint_id}"
     )
 
+    rules = load_legacy_rules(bundle.legacy_rules_path)
+    report(
+        f"legacy_current_logic_2026 OK: categorías={len(rules.categories)} "
+        f"path={bundle.legacy_rules_path}"
+    )
+
     service = GenerationService(
         config_dir=app_paths.excel_writer_config_dir(),
         artifacts_dir=app_paths.diagnostics_dir(),
     )
     policy = service._policy()
-    report(f"excel_writer_2026 OK: version={policy.get('version')}")
+    control_map = service._control_map(policy)
+    report(f"excel_writer_2026 OK: version={policy.get('version')} control={control_map.sheet}")
 
     report(f"user_data_dir: {app_paths.user_data_dir()}")
     report(f"logs_dir: {app_paths.logs_dir()}")

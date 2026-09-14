@@ -10,7 +10,8 @@ Excel COM/pywin32; ver docs/WINDOWS_PACKAGING.md):
 
     dist/REMASEP/REMASEP.exe
     dist/REMASEP/_internal/...   (Python, Qt, config/runtime_2026,
-                                   config/excel_writer_2026)
+                                   config/excel_writer_2026,
+                                   config/legacy_current_logic_2026)
 
 Uso:  pyinstaller packaging/remasep.spec --noconfirm
 (o, más simple, ``scripts\\build_windows.ps1`` desde PowerShell en Windows).

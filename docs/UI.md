@@ -20,7 +20,7 @@ Inicio → Nuevo informe → Análisis → Resumen mensual (Medinet) → Generar
 | **Inicio** | `screens/home.py` | Título `REMASEP`, subtítulo, botón **Nuevo informe**. Card discreta "Último informe generado" (sólo si hay `outputs/REMASEP_*.xlsm`, con **Abrir carpeta**). |
 | **Nuevo informe** | `screens/new_report.py` | Período (mes/año) con **detección asistida** al elegir el Medinet (ver abajo), selector **Archivo de Medinet** (`.xlsx`/`.xlsm`, muestra nombre + estado), selector **Plantilla REMASEP** (`.xlsm`, valida el fingerprint con `check_template_compatibility`). **Analizar datos** se habilita sólo con ambos archivos válidos **y** un período presente en el archivo. |
 | **Análisis** | `screens/analysis.py` | Progreso comprensible (`ANALYSIS_STEPS`, sin logs). Al terminar: `state.summary` → Resumen. Ante error: `ErrorBanner` con mensaje humano + acción "Elegir otro archivo". |
-| **Resumen mensual** | `screens/dashboard.py` | Fuente **Medinet** únicamente. 4 KPIs + 4 gráficos agregados (sin PII). Botones **Exportar resumen PDF** y **Generar REMASEP**. |
+| **Resumen mensual** | `screens/dashboard.py` | Fuente **Medinet** únicamente. 4 KPIs + 4 gráficos agregados (sin PII). Si hay inválidos relevantes muestra el diagnóstico agregado y deshabilita **Generar REMASEP**. |
 | **Generar** | `screens/generate.py` | **Diálogo "Guardar como"** (nombre sugerido `REMASEP_YYYY_MM_DRAFT.xlsm`) → progreso (`GENERATION_STEPS`) → `GenerationService` con esa ruta explícita. Resultado: nombre / período / atenciones consideradas / integridad; botones **Abrir Excel** / **Abrir carpeta** / **Volver al inicio**. Aviso `NOT_FOR_SUBMISSION` (no es un error). Ante error del backend: mensaje humano; si el nombre ya existe, **"Elegir otro nombre"** reabre "Guardar como" (no vuelve a Nuevo informe). |
 
 Navegación: `MainWindow` + `QStackedWidget`; cada pantalla expone `.name` y
@@ -68,12 +68,13 @@ Al pulsar **Generar REMASEP**, `GenerateScreen.on_enter()` abre
 ## Modelo de datos del resumen — `MonthlyMedinetSummary`
 
 `src/remasep/services/medinet_summary.py`. **Adaptador de sólo lectura**: reusa
-`processing_scope_frame` (válidas ∩ período) + `apply_estado_filter` (regla
+`select_period_records` (válidas + diagnóstico de inválidas del período) + `apply_estado_filter` (regla
 ESTADO confirmada, Sprint 3.9) + agregación pandas. Independiente de Qt, sin PII,
 testeable. La UI y el PDF consumen **el mismo** summary.
 
 Campos (todos agregados): `period_label/_year/_month`, `period_scope_records`,
-`included_records`, `excluded_records`, `estado_distribution`
+`valid_records`, `invalid_records`, `problem_counts`, `included_records`,
+`excluded_records`, `estado_distribution`
 (`EstadoCategoryCount`: label/count/**included**), `sex_distribution`,
 `age_distribution`, `service_distribution` (top 8 especialidades + "Otras"),
 `estado_included_states` / `estado_excluded_states`, `estado_filter_status`,
@@ -81,7 +82,10 @@ Campos (todos agregados): `period_label/_year/_month`, `period_scope_records`,
 (1 decimal), `considered_ratio_label` (`"1364 / 2114"`), `as_dict()` (sólo claves
 agregadas).
 
-Invariante: `included_records + excluded_records == period_scope_records`.
+Invariantes: `included_records + excluded_records == valid_records` y
+`valid_records + invalid_records == period_scope_records`. Los inválidos del mes
+bloquean generación; los de otro mes no. Una fecha de cita imposible de asignar
+bloquea conservadoramente.
 
 Julio 2026 (archivo real): scope **2 114**, consideradas **1 364**, excluidas
 **750**, **64,5 %** — idéntico a `build_production_pending_writes`
@@ -118,8 +122,10 @@ es un screenshot: se compone un reporte limpio de **una página** A4.
   (testeable sin pintar): título `REMASEP`, `Resumen mensual · Fuente: Medinet`,
   período, 4 KPIs, 4 gráficos, pie `Fuente: Medinet` + `Generado por REMASEP
   Automation`, nota "…únicamente a datos provenientes de Medinet…".
-- `export_summary_pdf(summary, path) -> Path` — sólo **pinta**. Lanza
-  `FileExistsError` si el destino existe (sin sobrescritura silenciosa).
+- `export_summary_pdf(summary, path) -> Path` — inicia y finaliza el painter de
+  forma comprobada y sólo retorna si existe un archivo no vacío con cabecera y
+  cierre PDF. Lanza `FileExistsError` si el destino existe y `PdfExportError` si
+  el dispositivo o el archivo final fallan; un parcial nunca se anuncia como éxito.
 - `suggested_pdf_name(summary)` → `Resumen_Medinet_2026_07.pdf`.
 
 La pantalla usa `QFileDialog.getSaveFileName` (sugerido en `~`), fuerza `.pdf` y

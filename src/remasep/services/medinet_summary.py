@@ -22,7 +22,7 @@ import pandas as pd
 
 from remasep.services.common import Period
 from remasep.services.legacy_transform import legacy_age_years
-from remasep.services.medinet_analysis import processing_scope_frame
+from remasep.services.medinet_analysis import select_period_records
 from remasep.services.production_pipeline import apply_estado_filter
 from remasep.services.runtime_assets import RuntimeBundle, load_runtime_bundle
 
@@ -68,7 +68,10 @@ class MonthlyMedinetSummary:
     period_label: str
     period_year: int
     period_month: int
-    period_scope_records: int          # válidos ∩ período (antes de ESTADO)
+    period_scope_records: int          # válidos + inválidos relevantes del período
+    valid_records: int                  # válidos del período, antes de ESTADO
+    invalid_records: int                # inválidos relevantes; nunca contabilizados
+    problem_counts: tuple[tuple[str, int], ...]  # diagnóstico agregado, sin PII
     included_records: int              # tras la regla ESTADO confirmada
     excluded_records: int              # excluidos por ESTADO
     estado_distribution: tuple[EstadoCategoryCount, ...]
@@ -81,6 +84,18 @@ class MonthlyMedinetSummary:
     generated_at: str
     pending_sources: tuple[str, ...] = field(default_factory=lambda: PENDING_SOURCES)
     source: str = "Medinet"
+
+    @property
+    def validation_blocked(self) -> bool:
+        return self.invalid_records > 0
+
+    @property
+    def excluded_by_estado(self) -> int:
+        return self.excluded_records
+
+    @property
+    def processing_scope_records(self) -> int:
+        return self.included_records
 
     @property
     def included_percentage(self) -> float:
@@ -97,6 +112,14 @@ class MonthlyMedinetSummary:
             "source": self.source,
             "period": self.period_label,
             "period_scope_records": self.period_scope_records,
+            "valid_records": self.valid_records,
+            "invalid_records": self.invalid_records,
+            "problem_counts": [
+                {"code": code, "count": count} for code, count in self.problem_counts
+            ],
+            "validation_blocked": self.validation_blocked,
+            "excluded_by_estado": self.excluded_by_estado,
+            "processing_scope_records": self.processing_scope_records,
             "included_records": self.included_records,
             "excluded_records": self.excluded_records,
             "included_percentage": self.included_percentage,
@@ -167,7 +190,8 @@ def build_monthly_medinet_summary(
     ``build_production_pending_writes(...).scope``.
     """
     bundle = bundle or load_runtime_bundle()
-    period_frame = processing_scope_frame(medinet_path, period, sheet_name=sheet_name)
+    selection = select_period_records(medinet_path, period, sheet_name=sheet_name)
+    period_frame = selection.frame
     included_frame, excluded = apply_estado_filter(period_frame, bundle.estado_filter)
 
     included_norm = bundle.estado_filter.included_normalized()
@@ -185,7 +209,10 @@ def build_monthly_medinet_summary(
         period_label=period.label,
         period_year=period.year,
         period_month=period.month,
-        period_scope_records=len(period_frame),
+        period_scope_records=selection.period_scope_records,
+        valid_records=selection.valid_records,
+        invalid_records=selection.invalid_records,
+        problem_counts=selection.problem_counts,
         included_records=len(included_frame),
         excluded_records=int(excluded),
         estado_distribution=estado_dist,

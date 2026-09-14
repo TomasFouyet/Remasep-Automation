@@ -18,6 +18,7 @@ def common_paths(specpath: str) -> dict:
     datas = [
         (str(config / "runtime_2026"), "config/runtime_2026"),
         (str(config / "excel_writer_2026"), "config/excel_writer_2026"),
+        (str(config / "legacy_current_logic_2026"), "config/legacy_current_logic_2026"),
     ]
 
     # win32com/pythoncom/pywintypes se importan de forma perezosa (funciones,

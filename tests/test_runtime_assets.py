@@ -45,6 +45,10 @@ def test_committed_bundle_loads_and_validates():
     assert bundle.estado_filter.excluded_states == (
         "Cancelado", "No Se Presenta", "Agendado", "Confirmado", "Re-Agendado",
     )
+    assert Path(bundle.legacy_rules_path).name == "rules.yaml"
+    assert bundle.legacy_rules_sha256 == (
+        "f12abf80a783c40dfc106e398ac4ad40ba7a9340a8b5bcf994a672e5c42ee2a3"
+    )
     # el catálogo cubre las 1122 + dependencias transitivas
     assert len(bundle.formula_index) >= 1122
     for w in bundle.write_instructions:

@@ -62,8 +62,15 @@ class DashboardScreen(QWidget):
         disclaimer.setProperty("role", "faint")
         disclaimer.setWordWrap(True)
 
+        self._validation_warning = QLabel()
+        self._validation_warning.setObjectName("bannerError")
+        self._validation_warning.setWordWrap(True)
+        self._validation_warning.setVisible(False)
+
         # --- KPIs ---
-        self.kpi_period = MetricCard("Citas del período", hint="Válidas dentro del mes")
+        self.kpi_period = MetricCard(
+            "Citas del período", hint="Válidas e inválidas detectadas dentro del mes"
+        )
         self.kpi_included = MetricCard(
             "Consideradas para REMASEP", hint="Sólo estados confirmados", accent=True
         )
@@ -113,6 +120,7 @@ class DashboardScreen(QWidget):
         content_layout.setContentsMargins(0, 0, 8, 0)
         content_layout.setSpacing(THEME.gap_lg)
         content_layout.addLayout(kpi_row)
+        content_layout.addWidget(self._validation_warning)
         content_layout.addLayout(charts)
         content_layout.addWidget(self._pending_card)
         content_layout.addStretch()
@@ -164,6 +172,19 @@ class DashboardScreen(QWidget):
         self.kpi_excluded.set_value(s.excluded_records)
         self.kpi_ratio.set_value(f"{s.included_percentage:g}%")
         self.kpi_ratio.set_hint(s.considered_ratio_label)
+        if s.validation_blocked:
+            noun = "registro inválido" if s.invalid_records == 1 else "registros inválidos"
+            self._validation_warning.setText(
+                f"No se puede generar el REMASEP: hay {s.invalid_records} {noun} "
+                "relevante(s) para este período. Corrige el archivo de Medinet y vuelve "
+                "a analizarlo. Ningún registro inválido fue contado."
+            )
+            self._validation_warning.setVisible(True)
+            self.generate_button.setEnabled(False)
+        else:
+            self._validation_warning.clear()
+            self._validation_warning.setVisible(False)
+            self.generate_button.setEnabled(True)
 
         self.chart_estado.set_bars([
             Bar(e.label, e.count, THEME.chart_included if e.included else THEME.chart_excluded)

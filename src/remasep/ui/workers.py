@@ -26,7 +26,10 @@ from remasep.services.medinet_summary import (
     MonthlyMedinetSummary,
     build_monthly_medinet_summary,
 )
-from remasep.services.production_pipeline import build_production_pending_writes
+from remasep.services.production_pipeline import (
+    InvalidPeriodRecordsError,
+    build_production_pending_writes,
+)
 from remasep.ui.errors import HumanError, humanize_error, humanize_generation_status
 
 ANALYSIS_STEPS: tuple[str, ...] = (
@@ -92,7 +95,31 @@ def run_generation(
         artifacts_dir=app_paths.diagnostics_dir(),
     )
     bundle = load_runtime_bundle()
-    production = build_production_pending_writes(medinet_path, period, bundle=bundle)
+    try:
+        production = build_production_pending_writes(medinet_path, period, bundle=bundle)
+    except InvalidPeriodRecordsError as exc:
+        noun = "registro" if exc.invalid_records == 1 else "registros"
+        return GenerationOutcome(
+            ok=False,
+            status="ABORTED_INVALID_SOURCE_RECORDS",
+            submission_label="",
+            output_path=None,
+            written_cells=0,
+            considered_records=0,
+            integrity_ok=False,
+            control_status="",
+            warnings=(),
+            human_error=HumanError(
+                "El archivo contiene registros inválidos para este período.",
+                f"Encontramos {exc.invalid_records} {noun} que no puede procesarse sin "
+                "alterar el informe. Corrige el export de Medinet y vuelve a analizarlo.",
+                "Elegir otro archivo",
+                technical=(
+                    "invalid source records: "
+                    + ", ".join(f"{code}={count}" for code, count in exc.problem_counts)
+                ),
+            ),
+        )
     if production.run.value_type_conflicts or production.run.unsupported:
         return GenerationOutcome(
             ok=False, status="ABORTED_PREFLIGHT", submission_label="",

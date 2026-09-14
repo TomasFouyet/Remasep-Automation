@@ -33,6 +33,8 @@ REQUIRED_RELATIVE_PATHS = (
     "_internal/config/runtime_2026/metric_catalog.csv",
     "_internal/config/excel_writer_2026/policy.yaml",
     "_internal/config/excel_writer_2026/control_map.yaml",
+    # F03: las reglas legacy productivas también deben quedar en el bundle.
+    "_internal/config/legacy_current_logic_2026/rules.yaml",
 )
 
 # NO deben aparecer en ningún nombre de archivo/carpeta del dist (Fase 3).

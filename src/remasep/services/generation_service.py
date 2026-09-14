@@ -38,8 +38,8 @@ from remasep.services.excel_writer import (
     snapshot_from_path,
 )
 from remasep.services.metric_value_producer import PendingWrite
+from remasep.services.runtime_assets import resolve_config_dir
 
-_DEFAULT_CONFIG_DIR = Path("config/excel_writer_2026")
 _DEFAULT_ARTIFACTS_DIR = Path("artifacts/excel_writer")
 _FALLBACK_FINGERPRINT = "stf:dc624775927d4d4d"
 
@@ -87,10 +87,14 @@ class GenerationService:
     def __init__(
         self,
         *,
-        config_dir: Path = _DEFAULT_CONFIG_DIR,
+        config_dir: Path | None = None,
         artifacts_dir: Path = _DEFAULT_ARTIFACTS_DIR,
     ) -> None:
-        self._config_dir = Path(config_dir)
+        self._config_dir = (
+            Path(config_dir)
+            if config_dir is not None
+            else resolve_config_dir("excel_writer_2026", "policy.yaml")
+        )
         self._artifacts_dir = Path(artifacts_dir)
 
     # -- configuración ------------------------------------------------

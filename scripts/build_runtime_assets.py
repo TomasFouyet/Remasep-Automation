@@ -44,6 +44,7 @@ from remasep.services.medinet_input_reconciliation import (
 DEFAULT_GENERATOR = "data/local/GENERACION DATOS REMASEP.xlsx"
 DEFAULT_MANIFEST = "artifacts/writable_target_mapping/write_manifest_ready.csv"
 DEFAULT_ZERO_POLICY = "config/metric_value_producer_2026/zero_write_policy.yaml"
+DEFAULT_LEGACY_RULES = "config/legacy_current_logic_2026/rules.yaml"
 DEFAULT_OUT = "config/runtime_2026"
 
 # Sprint 3.9 fase 2 — regla ESTADO CONFIRMADA por el responsable funcional
@@ -170,7 +171,13 @@ def _write_csv(path: Path, columns: tuple[str, ...], rows: list[dict]) -> None:
         writer.writerows(rows)
 
 
-def build(generator: Path, manifest: Path, zero_policy: Path, out_dir: Path) -> dict:
+def build(
+    generator: Path,
+    manifest: Path,
+    zero_policy: Path,
+    out_dir: Path,
+    legacy_rules: Path = Path(DEFAULT_LEGACY_RULES),
+) -> dict:
     out_dir.mkdir(parents=True, exist_ok=True)
     manifest_rows = _load_manifest(manifest)
     manifest_ids = [r["source_metric_id"] for r in manifest_rows]
@@ -273,6 +280,11 @@ def build(generator: Path, manifest: Path, zero_policy: Path, out_dir: Path) -> 
         "detail_contract": "detail_contract.yaml",
         "zero_policy": "zero_policy.yaml",
         "estado_filter": "estado_filter.yaml",
+        "legacy_rules": {
+            "config_dir": "legacy_current_logic_2026",
+            "file": legacy_rules.name,
+            "sha256": _sha256(legacy_rules),
+        },
         "assets": assets,
         "notes": (
             "Assets versionados con la app. GENERACION DATOS REMASEP.xlsx NO forma "
@@ -347,6 +359,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--generator", default=DEFAULT_GENERATOR)
     parser.add_argument("--manifest", default=DEFAULT_MANIFEST)
     parser.add_argument("--zero-policy", default=DEFAULT_ZERO_POLICY)
+    parser.add_argument("--legacy-rules", default=DEFAULT_LEGACY_RULES)
     parser.add_argument("--out", default=DEFAULT_OUT)
     parser.add_argument("--no-self-check", action="store_true")
     return parser
@@ -355,12 +368,18 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     generator, manifest = Path(args.generator), Path(args.manifest)
-    for p in (generator, manifest, Path(args.zero_policy)):
+    for p in (generator, manifest, Path(args.zero_policy), Path(args.legacy_rules)):
         if not p.is_file():
             print(f"ERROR: no existe {p}", file=sys.stderr)
             return 2
     try:
-        summary = build(generator, manifest, Path(args.zero_policy), Path(args.out))
+        summary = build(
+            generator,
+            manifest,
+            Path(args.zero_policy),
+            Path(args.out),
+            Path(args.legacy_rules),
+        )
     except RemasepError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 2

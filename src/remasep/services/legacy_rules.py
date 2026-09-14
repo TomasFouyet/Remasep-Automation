@@ -20,12 +20,7 @@ import yaml
 from remasep.core.errors import RemasepError
 from remasep.core.text import normalize_legacy_text
 
-DEFAULT_LEGACY_RULES_PATH = (
-    Path(__file__).resolve().parents[3]
-    / "config"
-    / "legacy_current_logic_2026"
-    / "rules.yaml"
-)
+LEGACY_RULES_DIR_NAME = "legacy_current_logic_2026"
 
 _VALID_OPERATORS = {"equals", "contains"}
 _VALID_FIELDS = {"TIPO_DE_CITA", "PRESTACION"}
@@ -88,7 +83,16 @@ class LegacyRuleSet:
 
 
 def load_legacy_rules(path: str | Path | None = None) -> LegacyRuleSet:
-    rules_path = Path(path) if path is not None else DEFAULT_LEGACY_RULES_PATH
+    # Import perezoso: runtime_assets modela fórmulas con tipos del productor,
+    # que a su vez importa LegacyRuleSet. El resolver sigue siendo único sin
+    # introducir un ciclo durante la carga de módulos.
+    from remasep.services.runtime_assets import resolve_config_dir
+
+    rules_path = (
+        Path(path)
+        if path is not None
+        else resolve_config_dir(LEGACY_RULES_DIR_NAME, "rules.yaml") / "rules.yaml"
+    )
     if not rules_path.is_file():
         raise LegacyRulesError(f"No se encontró el archivo de reglas legacy: {rules_path}")
 
