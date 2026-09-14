@@ -532,12 +532,20 @@ def test_no_process_killing_in_codebase():
     """El writer nunca mata procesos ni fuerza borrados globales: no hay
     ``subprocess`` / ``os.system`` / ``os.kill`` / ``psutil`` ni comandos de
     kill como literales de string. (Las MENCIONES en docstrings de que NO se
-    hace esto están permitidas y se ignoran.)"""
+    hace esto están permitidas y se ignoran.)
+
+    Excepción nombrada: ``scripts/validate_af_age_excel_com.py`` (validación
+    histórica AF vs Excel COM) sí importa ``subprocess`` para invocar
+    ``powershell.exe`` como puente COM aislado — no reintroduce ningún riesgo
+    de matar procesos: sigue sujeto a **todos** los demás chequeos de este
+    test (``banned_strings``/``banned_calls``), sólo se exime la línea de
+    import en sí."""
     import ast
 
     root = Path(__file__).resolve().parent.parent
     banned_strings = ("taskkill", "stop-process", "pkill", "killall", "/f /im")
     banned_calls = {("os", "system"), ("os", "kill"), ("os", "popen")}
+    subprocess_import_allowlist = {"validate_af_age_excel_com.py"}
     hits: list[str] = []
     for py in list((root / "src").rglob("*.py")) + list((root / "scripts").rglob("*.py")):
         tree = ast.parse(py.read_text(encoding="utf-8"), filename=str(py))
@@ -547,16 +555,21 @@ def test_no_process_killing_in_codebase():
             for n in ast.walk(tree)
             if isinstance(n, ast.Expr) and isinstance(n.value, ast.Constant)
         }
+        allow_subprocess_import = py.name in subprocess_import_allowlist
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
                 for alias in node.names:
-                    if alias.name.split(".")[0] in {"subprocess", "psutil"}:
+                    root_name = alias.name.split(".")[0]
+                    if root_name == "subprocess" and allow_subprocess_import:
+                        continue
+                    if root_name in {"subprocess", "psutil"}:
                         hits.append(f"{py.name}: import {alias.name}")
             elif isinstance(node, ast.ImportFrom) and (node.module or "").split(".")[0] in {
                 "subprocess",
                 "psutil",
             }:
-                hits.append(f"{py.name}: from {node.module}")
+                if not ((node.module or "").split(".")[0] == "subprocess" and allow_subprocess_import):
+                    hits.append(f"{py.name}: from {node.module}")
             elif (
                 isinstance(node, ast.Constant)
                 and isinstance(node.value, str)
