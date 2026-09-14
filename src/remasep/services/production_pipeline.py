@@ -21,9 +21,10 @@ from pathlib import Path
 
 import pandas as pd
 
+from remasep.core.errors import RemasepError
 from remasep.services.common import Period
 from remasep.services.legacy_rules import load_legacy_rules
-from remasep.services.medinet_analysis import processing_scope_frame
+from remasep.services.medinet_analysis import select_period_records
 from remasep.services.metric_value_producer import (
     MODE_PRODUCTION,
     CompletenessReport,
@@ -50,6 +51,26 @@ class ProductionScope:
     estado_included_states: tuple[str, ...]
     estado_excluded_records: int
     processing_scope_records: int       # post-ESTADO (lo que se procesa)
+
+
+class InvalidPeriodRecordsError(RemasepError):
+    """Hay registros inválidos cuya exclusión podría alterar el mes solicitado."""
+
+    def __init__(
+        self,
+        invalid_records: int,
+        problem_counts: tuple[tuple[str, int], ...],
+        *,
+        unassigned_records: int = 0,
+    ) -> None:
+        self.invalid_records = invalid_records
+        self.problem_counts = problem_counts
+        self.unassigned_records = unassigned_records
+        codes = ", ".join(f"{code}={count}" for code, count in problem_counts)
+        super().__init__(
+            f"Hay {invalid_records} registro(s) inválido(s) relevante(s) para el período; "
+            f"la generación fue bloqueada ({codes})."
+        )
 
 
 @dataclass
@@ -107,11 +128,18 @@ def build_production_metric_values(
     confirmados.
     """
     bundle = bundle or load_runtime_bundle()
-    period_frame = processing_scope_frame(medinet_path, period, sheet_name=sheet_name)
+    selection = select_period_records(medinet_path, period, sheet_name=sheet_name)
+    if selection.blocks_generation:
+        raise InvalidPeriodRecordsError(
+            selection.invalid_records,
+            selection.problem_counts,
+            unassigned_records=selection.unassigned_records,
+        )
+    period_frame = selection.frame
     frame, excluded = apply_estado_filter(period_frame, bundle.estado_filter)
 
     scope = ProductionScope(
-        period_scope_records=len(period_frame),
+        period_scope_records=selection.period_scope_records,
         estado_filter_status=bundle.estado_filter.status,
         estado_filter_applied=bundle.estado_filter.confirmed,
         estado_included_states=tuple(bundle.estado_filter.included_states),
@@ -119,7 +147,11 @@ def build_production_metric_values(
         processing_scope_records=len(frame),
     )
 
-    rows = build_rows(frame.to_dict("records"), bundle.detail_columns_map, load_legacy_rules())
+    rows = build_rows(
+        frame.to_dict("records"),
+        bundle.detail_columns_map,
+        load_legacy_rules(bundle.legacy_rules_path),
+    )
     producer = MetricValueProducer(
         formula_index=bundle.formula_index,
         detail_sheet=bundle.detail_sheet,

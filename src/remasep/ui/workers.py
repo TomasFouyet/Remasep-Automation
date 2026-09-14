@@ -26,8 +26,12 @@ from remasep.services.medinet_summary import (
     MonthlyMedinetSummary,
     build_monthly_medinet_summary,
 )
-from remasep.services.production_pipeline import build_production_pending_writes
+from remasep.services.production_pipeline import (
+    InvalidPeriodRecordsError,
+    build_production_pending_writes,
+)
 from remasep.ui.errors import HumanError, humanize_error, humanize_generation_status
+from remasep.ui.operation_lifecycle import OperationSnapshot
 
 ANALYSIS_STEPS: tuple[str, ...] = (
     "Leyendo el archivo de Medinet…",
@@ -84,11 +88,39 @@ def run_generation(
     Reutiliza el pipeline validado; no reimplementa nada. En Linux/sin Excel
     devuelve ``ok=False`` con un ``HumanError`` legible (no lanza).
     """
+    from remasep import app_paths
     from remasep.services.runtime_assets import load_runtime_bundle
 
-    service = service or GenerationService()
+    service = service or GenerationService(
+        config_dir=app_paths.excel_writer_config_dir(),
+        artifacts_dir=app_paths.diagnostics_dir(),
+    )
     bundle = load_runtime_bundle()
-    production = build_production_pending_writes(medinet_path, period, bundle=bundle)
+    try:
+        production = build_production_pending_writes(medinet_path, period, bundle=bundle)
+    except InvalidPeriodRecordsError as exc:
+        noun = "registro" if exc.invalid_records == 1 else "registros"
+        return GenerationOutcome(
+            ok=False,
+            status="ABORTED_INVALID_SOURCE_RECORDS",
+            submission_label="",
+            output_path=None,
+            written_cells=0,
+            considered_records=0,
+            integrity_ok=False,
+            control_status="",
+            warnings=(),
+            human_error=HumanError(
+                "El archivo contiene registros inválidos para este período.",
+                f"Encontramos {exc.invalid_records} {noun} que no puede procesarse sin "
+                "alterar el informe. Corrige el export de Medinet y vuelve a analizarlo.",
+                "Elegir otro archivo",
+                technical=(
+                    "invalid source records: "
+                    + ", ".join(f"{code}={count}" for code, count in exc.problem_counts)
+                ),
+            ),
+        )
     if production.run.value_type_conflicts or production.run.unsupported:
         return GenerationOutcome(
             ok=False, status="ABORTED_PREFLIGHT", submission_label="",
@@ -137,53 +169,57 @@ def run_generation(
 
 
 class AnalysisWorker(QObject):
-    step = Signal(str, int, int)          # texto, índice, total
-    done = Signal(object)                 # MonthlyMedinetSummary
-    failed = Signal(object)              # HumanError
+    step = Signal(str, str, int, int)     # run_id, texto, índice, total
+    done = Signal(str, object)            # run_id, MonthlyMedinetSummary
+    failed = Signal(str, object)          # run_id, HumanError
 
-    def __init__(self, medinet_path: str | Path, period: Period) -> None:
+    def __init__(self, operation: OperationSnapshot) -> None:
         super().__init__()
-        self._medinet_path = medinet_path
-        self._period = period
+        self._operation = operation
 
     def run(self) -> None:
+        operation = self._operation
         try:
             for i, label in enumerate(ANALYSIS_STEPS):
-                self.step.emit(label, i, len(ANALYSIS_STEPS))
-            summary = compute_medinet_summary(self._medinet_path, self._period)
+                self.step.emit(operation.run_id, label, i, len(ANALYSIS_STEPS))
+            summary = compute_medinet_summary(operation.input_path, operation.period)
         except RemasepError as exc:
-            self.failed.emit(humanize_error(exc))
+            self.failed.emit(operation.run_id, humanize_error(exc))
         except Exception as exc:  # noqa: BLE001 - a mensaje humano, sin traceback al usuario
-            self.failed.emit(humanize_error(exc))
+            self.failed.emit(operation.run_id, humanize_error(exc))
         else:
-            self.step.emit("Listo", len(ANALYSIS_STEPS), len(ANALYSIS_STEPS))
-            self.done.emit(summary)
+            self.step.emit(
+                operation.run_id, "Listo", len(ANALYSIS_STEPS), len(ANALYSIS_STEPS)
+            )
+            self.done.emit(operation.run_id, summary)
 
 
 class GenerationWorker(QObject):
-    step = Signal(str, int, int)
-    done = Signal(object)                 # GenerationOutcome
-    failed = Signal(object)              # HumanError
+    step = Signal(str, str, int, int)
+    done = Signal(str, object)            # run_id, GenerationOutcome
+    failed = Signal(str, object)          # run_id, HumanError
 
-    def __init__(
-        self,
-        medinet_path: str | Path,
-        period: Period,
-        template_path: str | Path,
-        output_path: str | Path | None,
-    ) -> None:
+    def __init__(self, operation: OperationSnapshot) -> None:
         super().__init__()
-        self._args = (medinet_path, period, template_path, output_path)
+        self._operation = operation
 
     def run(self) -> None:
+        operation = self._operation
         try:
             for i, label in enumerate(GENERATION_STEPS):
-                self.step.emit(label, i, len(GENERATION_STEPS))
-            outcome = run_generation(*self._args)
+                self.step.emit(operation.run_id, label, i, len(GENERATION_STEPS))
+            outcome = run_generation(
+                operation.input_path,
+                operation.period,
+                operation.template_path,
+                operation.output_path,
+            )
         except RemasepError as exc:
-            self.failed.emit(humanize_error(exc))
+            self.failed.emit(operation.run_id, humanize_error(exc))
         except Exception as exc:  # noqa: BLE001
-            self.failed.emit(humanize_error(exc))
+            self.failed.emit(operation.run_id, humanize_error(exc))
         else:
-            self.step.emit("Listo", len(GENERATION_STEPS), len(GENERATION_STEPS))
-            self.done.emit(outcome)
+            self.step.emit(
+                operation.run_id, "Listo", len(GENERATION_STEPS), len(GENERATION_STEPS)
+            )
+            self.done.emit(operation.run_id, outcome)

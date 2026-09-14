@@ -12,6 +12,7 @@ from datetime import date
 from pathlib import Path
 
 import pytest
+from PySide6.QtCore import QEventLoop, QTimer
 from PySide6.QtWidgets import QApplication
 
 from remasep.services.common import Period
@@ -64,6 +65,22 @@ def _drain() -> None:
     QApplication.instance().processEvents()
 
 
+def _wait_background(window) -> None:
+    """Espera por señal al backend cancelado para no filtrar QThreads entre tests."""
+    if not window.operations.has_running_operations:
+        return
+    loop = QEventLoop()
+    timed_out = []
+    timer = QTimer()
+    timer.setSingleShot(True)
+    timer.timeout.connect(lambda: (timed_out.append(True), loop.quit()))
+    window.operations.all_operations_finished.connect(loop.quit)
+    timer.start(5000)
+    loop.exec()
+    window.operations.all_operations_finished.disconnect(loop.quit)
+    assert not timed_out, "el backend de test no finalizó"
+
+
 def _fill_new_report(window, medinet, template, *, month=7, year=2026):
     nr = window.screens["new_report"]
     nr.month_combo.setCurrentIndex(month - 1)
@@ -77,7 +94,8 @@ def _fill_new_report(window, medinet, template, *, month=7, year=2026):
 def _run_analysis(window) -> None:
     """Lanza el análisis y lo resuelve de forma determinista."""
     window.screens["new_report"]._analyze()      # navega a 'analysis' + hilo
-    window.screens["analysis"]._teardown()        # detiene el hilo de fondo
+    window.screens["analysis"]._teardown()        # revoca el resultado del hilo
+    _wait_background(window)
     _drain()                                      # entrega su señal encolada
     window.screens["analysis"].run_now()          # ejecución síncrona (idempotente)
 
@@ -87,6 +105,7 @@ def _run_generate(window, out_path) -> None:
     window.state.output_path = Path(out_path)
     window.navigate("generate")                    # on_enter arranca el hilo
     window.screens["generate"]._teardown()
+    _wait_background(window)
     _drain()
     window.screens["generate"].run_now()
 
@@ -128,6 +147,7 @@ def test_step_indicator_advances_through_flow(window, medinet_file, template_fil
     assert window.screens["analysis"].steps.current == 1
 
     window.screens["analysis"]._teardown()
+    _wait_background(window)
     _drain()
     window.screens["analysis"].run_now()
     assert window.current_screen_name == "dashboard"
@@ -392,6 +412,98 @@ def test_generate_backend_error_shows_human_message(window, medinet_file, templa
 
 
 # ---------------------------------------------------------------------------
+# F08 — la pantalla de resultado debe distinguir CONTROL PASS/FAIL/UNAVAILABLE
+# y mostrar advertencias específicas (nunca "generado correctamente" a secas
+# para un estado que no está completamente validado).
+# ---------------------------------------------------------------------------
+
+
+def _outcome(*, control_status, warnings=(), ok=True, status="GENERATED_DRAFT"):
+    return GenerationOutcome(
+        ok=ok, status=status, submission_label="NOT_FOR_SUBMISSION",
+        output_path="outputs/REMASEP_2026_07_DRAFT.xlsm", written_cells=1122,
+        considered_records=24, integrity_ok=True, control_status=control_status,
+        warnings=warnings,
+    )
+
+
+def test_control_pass_is_shown_explicitly(window):
+    gen = window.screens["generate"]
+    gen._on_done(_outcome(control_status="PASS_INTERNAL_VALIDATION"))
+    txt = _all_label_text(gen)
+    assert "CONTROL" in txt
+    assert "sin errores" in txt.lower()
+
+
+def test_control_fail_is_shown_explicitly(window):
+    gen = window.screens["generate"]
+    gen._on_done(_outcome(control_status="FAIL_INTERNAL_VALIDATION"))
+    txt = _all_label_text(gen)
+    assert "CONTROL" in txt
+    assert "error" in txt.lower()
+    # nunca se debe afirmar que el resultado está completamente validado
+    assert "completamente validado" not in txt.lower()
+
+
+def test_control_unavailable_is_shown_explicitly(window):
+    gen = window.screens["generate"]
+    gen._on_done(_outcome(control_status="CONTROL_UNAVAILABLE"))
+    txt = _all_label_text(gen)
+    assert "CONTROL" in txt
+    assert "no se pudo" in txt.lower() or "no disponible" in txt.lower()
+
+
+def test_specific_warning_is_shown(window):
+    gen = window.screens["generate"]
+    gen._on_done(
+        _outcome(
+            control_status="PASS_INTERNAL_VALIDATION",
+            warnings=("TEMPLATE_SHA256_CHANGED",),
+        )
+    )
+    txt = _all_label_text(gen)
+    assert "plantilla" in txt.lower()  # texto humano, no el código técnico crudo
+    assert "TEMPLATE_SHA256_CHANGED" not in txt
+
+
+def test_cleanup_pending_warning_is_shown(window):
+    gen = window.screens["generate"]
+    gen._on_done(
+        _outcome(
+            control_status="PASS_INTERNAL_VALIDATION",
+            warnings=(
+                (
+                    "CLEANUP_PENDING: no se pudo borrar el workspace temporal "
+                    "/tmp/x (la salida final sí se generó)."
+                ),
+            ),
+        )
+    )
+    txt = _all_label_text(gen)
+    assert "temporal" in txt.lower()
+
+
+def test_failed_generation_is_never_shown_as_success(window):
+    gen = window.screens["generate"]
+    window.stack.setCurrentWidget(gen)
+    gen._on_done(
+        _outcome(
+            control_status="", ok=False, status="GENERATION_FAILED_INTEGRITY_CHECK",
+        )
+    )
+    assert not gen._result_card.isVisible()
+    assert gen._error.isVisible()
+
+
+def test_pending_sources_notice_survives_alongside_control_status(window):
+    gen = window.screens["generate"]
+    gen._on_done(_outcome(control_status="FAIL_INTERNAL_VALIDATION"))
+    txt = _all_label_text(gen)
+    assert "requerir información adicional" in txt  # aviso NOT_FOR_SUBMISSION
+    assert "CONTROL" in txt  # y el estado específico de CONTROL, ambos presentes
+
+
+# ---------------------------------------------------------------------------
 # "Guardar como" antes de generar (Problema 2)
 # ---------------------------------------------------------------------------
 
@@ -421,6 +533,7 @@ def test_generate_prompts_save_as_and_passes_chosen_path(
     window.state.output_path = None                 # fuerza el diálogo "Guardar como"
     window.navigate("generate")                     # on_enter -> getSaveFileName (mock) -> hilo
     window.screens["generate"]._teardown()
+    _wait_background(window)
     _drain()
     window.screens["generate"].run_now()
 
@@ -498,6 +611,7 @@ def test_output_exists_retry_reopens_save_as_not_new_report(
 
     gen._retry_or_back()                # botón "Elegir otro nombre"
     window.screens["generate"]._teardown()
+    _wait_background(window)
     _drain()
 
     assert reopened["n"] >= 1                       # reabrió "Guardar como"

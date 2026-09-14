@@ -21,7 +21,7 @@ problema, más agregados categóricos de ESTADO / MODALIDAD.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import pandas as pd
@@ -40,9 +40,11 @@ __all__ = [
     "ColumnDiagnostic",
     "MedinetAnalysisResult",
     "MedinetAnalysisService",
+    "PeriodSelectionResult",
     "RecordProblem",
     "detect_medinet_periods",
     "legacy_age_years",
+    "select_period_records",
     "structural_empty_mask",
 ]
 
@@ -186,6 +188,34 @@ class _ScopeSelection:
     scope_mask: pd.Series
 
 
+@dataclass(frozen=True)
+class PeriodSelectionResult:
+    """Resultado compartido de selección/validación para un período.
+
+    ``period_scope_records`` incluye los registros válidos y los inválidos
+    relevantes para el mes. El frame conservado contiene únicamente los
+    válidos: los inválidos nunca se cuentan ni reciben valores inventados.
+    ``problem_counts`` sólo contiene códigos y cantidades agregadas, sin PII.
+
+    Una fila inválida con ``DIA_CITA`` parseable se asigna exclusivamente a su
+    mes. Si ``DIA_CITA`` no es parseable no puede descartarse con seguridad de
+    ningún mes seleccionado y se considera relevante (``unassigned_records``).
+    """
+
+    period: Period
+    period_scope_records: int
+    valid_records: int
+    invalid_records: int
+    processing_scope_records: int
+    unassigned_records: int
+    problem_counts: tuple[tuple[str, int], ...]
+    frame: pd.DataFrame = field(repr=False, compare=False)
+
+    @property
+    def blocks_generation(self) -> bool:
+        return self.invalid_records > 0
+
+
 def _scope_selection(medinet: MedinetFrame, period: Period) -> _ScopeSelection:
     """Calcula, una sola vez, las máscaras que definen ``processing_scope_records``.
 
@@ -244,9 +274,56 @@ def processing_scope_frame(
     Sin filtro por ESTADO. Pensado para alimentar el productor de valores
     (Sprint 3.7A) sin exponer datos individuales fuera de un agregado.
     """
+    return select_period_records(path, period, sheet_name=sheet_name).frame.copy()
+
+
+def select_period_records(
+    path: str | Path,
+    period: Period,
+    *,
+    sheet_name: str | int | None = None,
+) -> PeriodSelectionResult:
+    """Selecciona el mes preservando el diagnóstico de registros inválidos.
+
+    Los problemas se agregan por código y nunca incorporan valores de celdas.
+    Una fecha de cita inválida queda sin período asignable y bloquea de forma
+    conservadora; una fila inválida con fecha válida de otro mes no bloquea el
+    período solicitado.
+    """
     medinet = read_medinet(path, sheet_name=sheet_name)
     selection = _scope_selection(medinet, period)
-    return medinet.frame.loc[selection.scope_mask].reset_index(drop=True)
+    dia = medinet.frame["DIA_CITA"]
+    dated_in_period = (
+        (~dia.isna())
+        & dia.dt.year.eq(period.year)
+        & dia.dt.month.eq(period.month)
+    ).fillna(False).astype(bool)
+    unassigned = selection.invalid_mask & selection.dia_bad
+    relevant_invalid = selection.invalid_mask & (dated_in_period | unassigned)
+
+    issue_masks = (
+        ("DIA_CITA_INVALID", selection.dia_bad),
+        ("FECHA_NACIMIENTO_INVALID", selection.fnac_present_bad),
+        ("SEXO_EMPTY", selection.sexo_empty),
+        ("TIPO_DE_CITA_EMPTY", selection.tipo_empty),
+    )
+    problem_counts = tuple(
+        (code, count)
+        for code, mask in issue_masks
+        if (count := int((mask & relevant_invalid).sum()))
+    )
+    valid_frame = medinet.frame.loc[selection.scope_mask].reset_index(drop=True)
+    invalid_records = int(relevant_invalid.sum())
+    return PeriodSelectionResult(
+        period=period,
+        period_scope_records=len(valid_frame) + invalid_records,
+        valid_records=len(valid_frame),
+        invalid_records=invalid_records,
+        processing_scope_records=len(valid_frame),
+        unassigned_records=int(unassigned.sum()),
+        problem_counts=problem_counts,
+        frame=valid_frame,
+    )
 
 
 def detect_medinet_periods(

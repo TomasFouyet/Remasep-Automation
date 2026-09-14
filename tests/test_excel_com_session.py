@@ -93,3 +93,85 @@ def test_teardown_is_safe_without_excel():
     session._teardown()  # no debe lanzar
     session.__exit__(None, None, None)
     assert session.excel is None
+
+
+# ---------------------------------------------------------------------------
+# F06 — política de macros/eventos de la instancia propia de Excel
+# ---------------------------------------------------------------------------
+#
+# DispatchEx no fija AutomationSecurity/EnableEvents explícitamente: por
+# defecto Office usa msoAutomationSecurityLow (TODAS las macros corren sin
+# aviso alguno cuando el archivo se abre por automatización). __enter__ debe
+# fijar una política conservadora en ESA instancia (nunca Trust Center /
+# configuración global) y __exit__ debe restaurar los valores previos.
+# Se inyecta un ``win32com``/``pythoncom`` falsos en sys.modules: sin esto,
+# __enter__ exige Windows real.
+
+
+class _FakeApplication:
+    """Application COM falsa: sólo lo que ``ExcelSession.__enter__`` toca."""
+
+    def __init__(self) -> None:
+        self.Visible = None
+        self.DisplayAlerts = None
+        # Los valores reales por defecto documentados por Microsoft.
+        self.AutomationSecurity = 1  # msoAutomationSecurityLow
+        self.EnableEvents = True
+        self.quit_calls = 0
+
+    def Quit(self) -> None:
+        self.quit_calls += 1
+
+
+@pytest.fixture
+def fake_com_environment(monkeypatch):
+    """Inyecta win32com.client.DispatchEx / pythoncom falsos + Windows falso."""
+    import sys
+    import types
+
+    app = _FakeApplication()
+    fake_client = types.SimpleNamespace(DispatchEx=lambda prog_id: app)
+    fake_win32com = types.ModuleType("win32com")
+    fake_win32com.client = fake_client
+    fake_pythoncom = types.ModuleType("pythoncom")
+    fake_pythoncom.CoInitialize = lambda: None
+    fake_pythoncom.CoUninitialize = lambda: None
+
+    monkeypatch.setitem(sys.modules, "win32com", fake_win32com)
+    monkeypatch.setitem(sys.modules, "win32com.client", fake_client)
+    monkeypatch.setitem(sys.modules, "pythoncom", fake_pythoncom)
+    monkeypatch.setattr(ec.platform, "system", lambda: "Windows")
+    return app
+
+
+def test_enter_forces_macro_security_and_disables_events(fake_com_environment):
+    app = fake_com_environment
+    session = ec.ExcelSession(visible=False)
+    session.__enter__()
+    assert app.AutomationSecurity == ec._MSO_AUTOMATION_SECURITY_FORCE_DISABLE
+    assert app.EnableEvents is False
+    session.__exit__(None, None, None)
+
+
+def test_exit_restores_previous_application_settings(fake_com_environment):
+    app = fake_com_environment
+    app.AutomationSecurity = 2  # msoAutomationSecurityByUI, valor previo simulado
+    app.EnableEvents = True
+    session = ec.ExcelSession(visible=False)
+    session.__enter__()
+    session.__exit__(None, None, None)
+    assert app.AutomationSecurity == 2
+    assert app.EnableEvents is True
+    assert app.quit_calls == 1
+
+
+def test_never_touches_trust_center_or_global_settings(fake_com_environment):
+    """El único objeto que la sesión toca es su propia instancia DispatchEx;
+    no existe ningún atributo/llamada a registro, Trust Center o política
+    global en ``ExcelSession`` (defensa por inspección del código fuente)."""
+    import inspect
+
+    source = inspect.getsource(ec.ExcelSession)
+    forbidden = ("winreg", "TrustCenter", "RegisteredAddIns", "CentralDeployment")
+    for token in forbidden:
+        assert token not in source

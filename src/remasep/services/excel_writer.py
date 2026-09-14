@@ -13,6 +13,11 @@ REMASEP oficial.
 
 from __future__ import annotations
 
+import csv
+import hashlib
+import io
+import json
+import os
 import shutil
 import time
 import uuid
@@ -85,6 +90,10 @@ FORMULA_EXPRESSION_CHANGE = "FORMULA_EXPRESSION_CHANGE"
 
 class ExcelWriterError(RemasepError):
     """Error del Excel writer con mensaje claro (sin traceback al usuario)."""
+
+
+class OutputAlreadyExistsError(ExcelWriterError):
+    """La publicación perdió la carrera porque el destino ya existe."""
 
 
 def describe_com_error(exc: BaseException) -> str:
@@ -162,8 +171,6 @@ def vba_payload_info(path: str | Path) -> tuple[bool, str | None]:
     with zipfile.ZipFile(p) as archive:
         if _VBA_ENTRY not in archive.namelist():
             return False, None
-        import hashlib
-
         return True, hashlib.sha256(archive.read(_VBA_ENTRY)).hexdigest()
 
 
@@ -335,6 +342,123 @@ def check_template_compatibility(
 
 
 # ---------------------------------------------------------------------------
+# Contrato semántico de plantilla (F02) — complementa el fingerprint
+# estructural, que protege coordenadas/protección/merges pero no el TEXTO de
+# las fórmulas. Certifica la EXPRESIÓN de TODA fórmula estática de la
+# plantilla oficial (``data_type == "f"`` en el archivo en blanco) — no un
+# subconjunto curado a mano: un subconjunto pequeño dejaba pasar sin detectar
+# el repro original de la auditoría (``REMASEP 01!C15`` reescrita a ``=0``).
+# No resuelve dependencias entre fórmulas ni certifica el workbook completo
+# (eso incluiría también inputs/valores, que SÍ deben poder cambiar). Ver
+# config/excel_writer_2026/template_semantic_contract.yaml +
+# template_static_formulas.csv para el contrato congelado, y
+# scripts/build_template_semantic_contract.py para regenerarlo.
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class CriticalFormula:
+    sheet: str
+    cell: str
+    formula: str
+
+
+@dataclass(frozen=True)
+class TemplateSemanticContract:
+    version: str
+    critical_formulas: tuple[CriticalFormula, ...] = ()
+
+    @property
+    def is_empty(self) -> bool:
+        return not self.critical_formulas
+
+
+def load_template_semantic_contract(
+    raw: Mapping, *, base_dir: Path | None = None
+) -> TemplateSemanticContract:
+    """Carga el contrato desde su representación YAML.
+
+    Dos formatos, ambos válidos:
+
+    - **Producción** (``scripts/build_template_semantic_contract.py``):
+      ``formulas_file`` referencia un CSV (``sheet,cell,formula``) resuelto
+      contra ``base_dir`` — certifica toda fórmula estática de la plantilla
+      oficial (miles de filas). Si ``formulas_file_sha256`` está presente se
+      verifica antes de confiar en el CSV (detecta una edición manual del
+      archivo sin pasar por el generador).
+    - **Inline** (tests / contratos sintéticos pequeños): ``critical_formulas:
+      [{sheet, cell, formula}, ...]`` directamente en el YAML, sin archivo
+      externo.
+    """
+    version = str(raw.get("version", "template_semantic_contract_2026"))
+    formulas_file = raw.get("formulas_file")
+    if formulas_file:
+        if base_dir is None:
+            raise ValueError(
+                "load_template_semantic_contract: 'formulas_file' requiere base_dir"
+            )
+        csv_path = base_dir / str(formulas_file)
+        if not csv_path.is_file():
+            raise FileNotFoundError(f"falta el CSV del contrato semántico: {csv_path}")
+        payload = csv_path.read_bytes()
+        expected_sha = raw.get("formulas_file_sha256")
+        if expected_sha and hashlib.sha256(payload).hexdigest() != str(expected_sha):
+            raise ValueError(
+                f"formulas_file_sha256 no coincide para {csv_path}: el CSV fue "
+                "modificado sin regenerar el contrato (usa "
+                "scripts/build_template_semantic_contract.py)"
+            )
+        reader = csv.DictReader(io.StringIO(payload.decode("utf-8")))
+        formulas = tuple(
+            CriticalFormula(sheet=row["sheet"], cell=row["cell"], formula=row["formula"])
+            for row in reader
+        )
+        return TemplateSemanticContract(version=version, critical_formulas=formulas)
+
+    formulas = tuple(
+        CriticalFormula(sheet=str(f["sheet"]), cell=str(f["cell"]), formula=str(f["formula"]))
+        for f in raw.get("critical_formulas", [])
+    )
+    return TemplateSemanticContract(version=version, critical_formulas=formulas)
+
+
+@dataclass(frozen=True)
+class TemplateSemanticViolation:
+    sheet: str
+    cell: str
+    reason: str  # ALTERED | MISSING
+    expected_formula: str
+    actual_formula: str | None
+
+
+@dataclass(frozen=True)
+class TemplateSemanticResult:
+    ok: bool
+    violations: tuple[TemplateSemanticViolation, ...] = ()
+
+
+def verify_template_semantic_contract(
+    formula_map: Mapping[tuple[str, str], str], contract: TemplateSemanticContract
+) -> TemplateSemanticResult:
+    """Compara sólo las celdas declaradas críticas contra su expresión
+    congelada. Usa ``_norm_formula`` (misma normalización que la verificación
+    de integridad post-guardado): un re-guardado legítimo no dispara un falso
+    rechazo, pero un cambio dentro de un literal sí se detecta."""
+    violations: list[TemplateSemanticViolation] = []
+    for cf in contract.critical_formulas:
+        actual = formula_map.get((cf.sheet, cf.cell))
+        if actual is None:
+            violations.append(
+                TemplateSemanticViolation(cf.sheet, cf.cell, "MISSING", cf.formula, None)
+            )
+        elif _norm_formula(actual) != _norm_formula(cf.formula):
+            violations.append(
+                TemplateSemanticViolation(cf.sheet, cf.cell, "ALTERED", cf.formula, actual)
+            )
+    return TemplateSemanticResult(ok=not violations, violations=tuple(violations))
+
+
+# ---------------------------------------------------------------------------
 # Integridad de fórmulas / VBA (§18 / §19)
 # ---------------------------------------------------------------------------
 
@@ -374,7 +498,58 @@ def compare_formula_integrity(
 
 
 def _norm_formula(text: str) -> str:
-    return text.strip().removeprefix("=").replace(" ", "").casefold()
+    """Normaliza una fórmula para comparar antes/después (F07).
+
+    Deliberadamente conservador: sólo ignora una diferencia cuando puede
+    DEMOSTRARSE cosmética; ante la duda, se preserva (falso rechazo visible
+    es preferible a un falso negativo silencioso — auditoría 2026-09-14).
+
+    - Literales de cadena (``"…"``): se preservan EXACTOS — case y espacios
+      incluidos. ``"A B"`` y ``"AB"``, o ``EXACT("a","a")`` y
+      ``EXACT("a","A")``, deben seguir siendo distintos.
+    - Nombres de hoja / referencias entre comillas simples (``'…'``,
+      incluida una referencia externa con ruta: ``'C:\\carpeta\\[Libro.xlsx]
+      Hoja 1'``): el espacio se preserva exacto (puede ser parte real del
+      nombre), pero el CASE sí se normaliza — Excel no permite dos hojas en
+      el mismo libro que sólo difieran en mayúsculas, así que esa
+      equivalencia está demostrada. El apóstrofo escapado (``''``) dentro
+      del nombre se reconoce y se conserva.
+    - Fuera de comillas: sólo se normaliza el case (funciones/referencias
+      son case-insensitive por especificación de Excel). El espacio NUNCA
+      se toca: Excel lo usa como operador de intersección
+      (``=A1:A10 B5:D5``) y no hay forma barata de distinguir ese espacio
+      de uno puramente decorativo sin un parser completo de Excel.
+    """
+    body = text.strip().removeprefix("=")
+    out: list[str] = []
+    i, n = 0, len(body)
+    while i < n:
+        ch = body[i]
+        if ch in ('"', "'"):
+            quote = ch
+            j = i + 1
+            literal = [quote]
+            while j < n:
+                if body[j] == quote:
+                    if j + 1 < n and body[j + 1] == quote:
+                        literal.append(quote * 2)
+                        j += 2
+                        continue
+                    literal.append(quote)
+                    j += 1
+                    break
+                literal.append(body[j])
+                j += 1
+            segment = "".join(literal)
+            # comillas dobles = literal de cadena (case/espacio significativos);
+            # comillas simples = nombre de hoja/referencia (case normalizable,
+            # espacio significativo).
+            out.append(segment if quote == '"' else segment.casefold())
+            i = j
+        else:
+            out.append(ch.casefold())
+            i += 1
+    return "".join(out)
 
 
 # La integridad VBA se compara **semánticamente** (código por módulo), no por el
@@ -425,9 +600,10 @@ def verify_targets(
         if key in after.formula_map:
             status, actual = "BECAME_FORMULA", after.formula_map[key]
         elif key not in after.values:
-            # 0 puede no aparecer en `values` si openpyxl lo omite; se maneja aparte
-            actual = after.values.get(key, 0 if _is_zero(pw.value) else None)
-            status = "OK" if _values_equal(actual, pw.value) else "MISSING"
+            # Ausente es ausente: un PendingWrite=0 exige un cero explícito en
+            # la celda guardada (política WRITE_ZERO), nunca una equivalencia
+            # cero/blanco (F07-B).
+            status, actual = "MISSING", None
         else:
             actual = after.values[key]
             status = "OK" if _values_equal(actual, pw.value) else "VALUE_MISMATCH"
@@ -443,10 +619,6 @@ def verify_targets(
             )
         )
     return TargetVerification(checks=tuple(checks))
-
-
-def _is_zero(value: object) -> bool:
-    return isinstance(value, (int, float)) and not isinstance(value, bool) and value == 0
 
 
 def _values_equal(a: object, b: object) -> bool:
@@ -639,6 +811,66 @@ class RunWorkspace:
     working_path: Path
 
 
+@dataclass(frozen=True)
+class OutputReservation:
+    """Reserva interproceso de un output, poseída por un ``run_id`` no sensible."""
+
+    output_path: Path
+    lock_path: Path
+    run_id: str
+    _payload: bytes = field(repr=False)
+
+    def release(self) -> bool:
+        """Borra sólo el lock cuyo contenido todavía acredita este ownership."""
+        try:
+            if self.lock_path.read_bytes() != self._payload:
+                return False
+            self.lock_path.unlink()
+        except (FileNotFoundError, PermissionError, OSError):
+            return False
+        return True
+
+
+def _reservation_path(output_path: Path) -> Path:
+    canonical = os.path.normcase(str(output_path.resolve())).encode("utf-8")
+    digest = hashlib.sha256(canonical).hexdigest()[:24]
+    return output_path.parent / f".remasep-reservation-{digest}.lock"
+
+
+def acquire_output_reservation(
+    output_path: str | Path, run_id: str
+) -> OutputReservation | None:
+    """Adquiere de forma atómica el derecho a publicar ``output_path``.
+
+    ``O_EXCL`` aporta exclusión entre procesos en filesystem local (incluido
+    NTFS). Un lock existente nunca se elimina por edad: requiere recuperación
+    manual después de comprobar que no queda una ejecución activa.
+    """
+    output = Path(output_path)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    lock_path = _reservation_path(output)
+    payload = json.dumps(
+        {"run_id": run_id}, sort_keys=True, separators=(",", ":")
+    ).encode("ascii")
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0)
+    try:
+        descriptor = os.open(lock_path, flags, 0o600)
+    except FileExistsError:
+        return None
+    try:
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.write(payload)
+            stream.flush()
+            os.fsync(stream.fileno())
+    except Exception:
+        try:
+            lock_path.unlink()
+        except OSError:
+            pass
+        raise
+    return OutputReservation(output, lock_path, run_id, payload)
+
+
 def new_run_id() -> str:
     return f"{datetime.now(UTC):%Y%m%dT%H%M%S}-{uuid.uuid4().hex[:12]}"
 
@@ -688,13 +920,20 @@ def cleanup_run_workspace(workspace: RunWorkspace) -> tuple[str, str | None]:
 
 
 def _atomic_promote(working_path: Path, final_path: Path) -> None:
-    """``os.replace`` (rename atómico) con reintento **acotado** ante un handle
-    residual de Excel en Windows. Sin loop infinito, sin borrado forzado."""
+    """Publica el archivo completo sin reemplazar jamás un destino existente.
+
+    El workspace está junto al output, por lo que ``os.link`` crea otro nombre
+    para el mismo archivo en forma atómica y con semántica create-if-absent en
+    NTFS y filesystems POSIX locales. El cleanup posterior elimina el nombre de
+    trabajo sin afectar el hard link final.
+    """
     last: OSError | None = None
     for attempt in range(_PROMOTE_ATTEMPTS):
         try:
-            working_path.replace(final_path)
+            os.link(working_path, final_path)
             return
+        except FileExistsError as exc:
+            raise OutputAlreadyExistsError("OUTPUT_ALREADY_EXISTS") from exc
         except (PermissionError, OSError) as exc:
             last = exc
             if attempt + 1 < _PROMOTE_ATTEMPTS:
@@ -738,6 +977,7 @@ class GenerationResult:
     control_status: str = ""
     preflight: PreflightReport | None = None
     template_compatibility: TemplateCompatibility | None = None
+    template_semantic_compatibility: TemplateSemanticResult | None = None
     formula_integrity: FormulaIntegrityReport | None = None
     vba_integrity: VbaComparison | None = None
     target_verification: TargetVerification | None = None
@@ -764,13 +1004,16 @@ def generate(
     open_writer: Callable[[Path], AbstractContextManager[WorkbookWriter]],
     control_map: ControlMap,
     inspect: Callable[[Path], WorkbookSnapshot] = snapshot_from_path,
+    semantic_contract: TemplateSemanticContract | None = None,
 ) -> GenerationResult:
     """Copia la plantilla, escribe los ``PendingWrite`` en la copia, recalcula,
     verifica y —sólo si todo pasa— promueve la copia de trabajo a salida final.
 
     ``open_writer`` construye el :class:`WorkbookWriter` (COM real o fake).
     ``inspect`` lee un :class:`WorkbookSnapshot` de un archivo (openpyxl por
-    defecto); se inyecta en tests.
+    defecto); se inyecta en tests. ``semantic_contract`` es opcional (F02):
+    si se pasa, la plantilla debe conservar la expresión de sus fórmulas
+    críticas (no sólo el fingerprint estructural) antes de escribir nada.
     """
     if request.mode not in _MODES:
         raise ExcelWriterError(f"modo de generación no soportado: {request.mode!r}")
@@ -823,10 +1066,44 @@ def generate(
         ]
         return result
 
+    # --- contrato semántico de plantilla (F02) -----------------------
+    if semantic_contract is not None and not semantic_contract.is_empty:
+        semantic = verify_template_semantic_contract(before.formula_map, semantic_contract)
+        result.template_semantic_compatibility = semantic
+        if not semantic.ok:
+            result.status = STATUS_TEMPLATE_INCOMPATIBLE
+            result.errors = [
+                f"TEMPLATE_SEMANTIC_CONTRACT_VIOLATION: {v.sheet}!{v.cell} ({v.reason})"
+                for v in semantic.violations
+            ]
+            return result
+
+    # --- reserva interproceso del derecho de publicación -----------
+    run_id = new_run_id()
+    result.run_id = run_id
+    reservation = acquire_output_reservation(request.output_path, run_id)
+    if reservation is None:
+        result.status = STATUS_OUTPUT_EXISTS
+        result.errors = ["OUTPUT_RESERVED"]
+        return result
+
+    def _release_reservation() -> None:
+        if not reservation.release():
+            result.warnings.append(
+                "RESERVATION_CLEANUP_PENDING: no se pudo retirar la reserva propia; "
+                "requiere verificación manual antes de eliminarla."
+            )
+
     # --- workspace temporal propio de ESTA corrida ------------------
-    request.output_path.parent.mkdir(parents=True, exist_ok=True)
-    workspace = create_run_workspace(request.output_path, tmp_base=request.tmp_base)
-    result.run_id = workspace.run_id
+    try:
+        workspace = create_run_workspace(
+            request.output_path, tmp_base=request.tmp_base, run_id=run_id
+        )
+    except Exception as exc:  # noqa: BLE001 - error manejable y reserva liberada
+        result.status = STATUS_GENERATION_FAILED
+        result.errors = [f"{exc.__class__.__name__}: {exc}"]
+        _release_reservation()
+        return result
     working_path = workspace.working_path
 
     def _finish_failure(status: str, errors: list[str]) -> GenerationResult:
@@ -844,6 +1121,7 @@ def generate(
         result.template_unchanged = (
             result.template_sha256_after == result.template_sha256_before
         )
+        _release_reservation()
         return result
 
     # --- copy-first + escritura --------------------------------------
@@ -921,6 +1199,8 @@ def generate(
         return _finish_failure(STATUS_OUTPUT_EXISTS, ["OUTPUT_ALREADY_EXISTS"])
     try:
         _atomic_promote(working_path, request.output_path)
+    except OutputAlreadyExistsError:
+        return _finish_failure(STATUS_OUTPUT_EXISTS, ["OUTPUT_ALREADY_EXISTS"])
     except ExcelWriterError as exc:
         return _finish_failure(STATUS_GENERATION_FAILED, [str(exc)])
 
@@ -933,6 +1213,7 @@ def generate(
             f"CLEANUP_PENDING: no se pudo borrar el workspace temporal {diag} "
             "(la salida final sí se generó). Se puede eliminar manualmente."
         )
+    _release_reservation()
 
     result.template_sha256_after = compute_sha256(request.template_path)
     result.template_unchanged = result.template_sha256_after == result.template_sha256_before

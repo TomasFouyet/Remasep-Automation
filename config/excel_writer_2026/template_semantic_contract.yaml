@@ -1,0 +1,23 @@
+version: template_semantic_contract_2026
+strategy: ALL_STATIC_TEMPLATE_FORMULAS
+structural_template_fingerprint_id: stf:dc624775927d4d4d
+formulas_file: template_static_formulas.csv
+formulas_file_sha256: 369def7f3fb60498f6d354d120c28e02bde7ddcf3b15c9551a399ed9d6166a9b
+total_formulas: 11466
+formulas_per_sheet:
+  B2 ANEXO: 88
+  CONTROL: 17
+  EyP_ET: 7551
+  NOMBRE: 26
+  REMASEP 01: 1221
+  REMASEP B1: 162
+  REMASEP_OD: 1407
+  SERV_SANGRE: 223
+  TV_MI: 271
+  URGENCIAS: 500
+notes: 'Congela TODA celda de formula estatica (data_type==''f'') de la plantilla
+  oficial en blanco -- no solo un subconjunto curado a mano. Un input manual/valor
+  mensual nunca es una formula en la plantilla en blanco, asi que queda fuera automaticamente.
+  Verificado en build time: ningun target de write_manifest.csv coincide con una celda
+  de formula. Regenerar SOLO con este script cuando cambie la plantilla oficial --
+  nunca en runtime.'

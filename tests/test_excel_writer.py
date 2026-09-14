@@ -100,6 +100,7 @@ def test_happy_path_writes_all_targets_and_promotes_atomically(tmp_path):
     assert result.cleanup_status == w.CLEANUP_OK
     assert result.workspace_path is None
     assert not (tmp_path / ".remasep-tmp").exists()  # workspace borrado
+    assert not w._reservation_path(request.output_path).exists()
     assert result.template_unchanged is True
     assert result.submission_label == w.SUBMISSION_LABEL
 
@@ -227,6 +228,7 @@ def test_target_with_formula_aborts_and_keeps_template(tmp_path):
     assert result.template_unchanged is True
     assert result.cleanup_status == w.CLEANUP_OK
     assert not (tmp_path / ".remasep-tmp").exists()
+    assert not w._reservation_path(request.output_path).exists()
 
 
 def test_target_not_writable_aborts(tmp_path):
@@ -251,6 +253,131 @@ def test_formula_expression_change_fails_integrity(tmp_path):
     assert result.writer_integrity_status == w.WRITER_INTEGRITY_FAIL
     assert not request.output_path.exists()
     assert result.formula_integrity.ok is False
+
+
+# ---------------------------------------------------------------------------
+# F07 — la comparación de integridad no debe aceptar cambios semánticos reales
+# ---------------------------------------------------------------------------
+
+
+def test_norm_formula_distinguishes_literal_with_internal_space():
+    a = w._norm_formula('=IF(A1="A B",1,0)')
+    b = w._norm_formula('=IF(A1="AB",1,0)')
+    assert a != b
+
+
+def test_norm_formula_distinguishes_literal_case():
+    a = w._norm_formula('=EXACT("a","a")')
+    b = w._norm_formula('=EXACT("a","A")')
+    assert a != b
+
+
+def test_norm_formula_still_accepts_legitimate_resave_variants():
+    """Sólo se acepta como cosmética una diferencia PROBADA como tal: case de
+    función/referencia fuera de comillas. El espacio nunca se toca (puede ser
+    el operador de intersección de Excel) — ver los casos adversariales de
+    abajo."""
+    a = w._norm_formula("=SUM(A1:B1)")
+    b = w._norm_formula("=sum(A1:B1)")
+    assert a == b
+
+
+# ---------------------------------------------------------------------------
+# F07 (revisión adversarial) — el normalizador no puede: (a) confundir dos
+# hojas distintas por borrar el espacio de un nombre entre comillas simples,
+# (b) romper el escape de un apóstrofo dentro de un nombre de hoja, (c)
+# tocar una ruta/nombre de referencia externa entre comillas, (d) borrar el
+# operador de intersección de Excel (un espacio FUERA de comillas). Ante la
+# duda sobre si un espacio es cosmético, se preserva: prioridad = falso
+# rechazo visible > falso negativo silencioso.
+# ---------------------------------------------------------------------------
+
+
+def test_norm_formula_distinguishes_quoted_sheet_names_differing_only_by_space():
+    a = w._norm_formula("='Sheet 1'!A1")
+    b = w._norm_formula("='Sheet1'!A1")
+    assert a != b
+
+
+def test_norm_formula_treats_quoted_sheet_name_case_as_cosmetic():
+    """Los nombres de hoja SÍ son case-insensitive por especificación de
+    Excel (no puede haber 'Hoja1' y 'HOJA1' a la vez en el mismo libro) —
+    a diferencia del espacio, esto es una equivalencia demostrable."""
+    a = w._norm_formula("=+'REMASEP 01'!B307")
+    b = w._norm_formula("=+'remasep 01'!B307")
+    assert a == b
+
+
+def test_norm_formula_preserves_escaped_apostrophe_in_quoted_sheet_name():
+    text = "='O''Brien Data'!A1"
+    normalized = w._norm_formula(text)
+    assert "o''brien data" in normalized
+    # cambiar el nombre real (sin el apóstrofo) debe seguir detectándose
+    other = w._norm_formula("='OBrien Data'!A1")
+    assert normalized != other
+
+
+def test_norm_formula_preserves_external_reference_path_and_space():
+    text = r"='C:\My Folder\[Book.xlsx]Sheet 1'!A1"
+    normalized = w._norm_formula(text)
+    assert r"c:\my folder\[book.xlsx]sheet 1" in normalized
+    # una ruta distinta (otra carpeta) no puede normalizar igual
+    other = r"='C:\Other Folder\[Book.xlsx]Sheet 1'!A1"
+    assert normalized != w._norm_formula(other)
+
+
+def test_norm_formula_never_deletes_the_intersection_whitespace_operator():
+    """``=A1:A10 B5:D5`` es la intersección de dos rangos: el espacio ES el
+    operador. Borrarlo cambiaría el significado de la fórmula, no sólo su
+    representación."""
+    intersection = w._norm_formula("=A1:A10 B5:D5")
+    concatenated_by_mistake = w._norm_formula("=A1:A10B5:D5")  # referencia inválida/otra
+    assert intersection != concatenated_by_mistake
+    assert " " in intersection
+
+
+def test_formula_literal_change_inside_string_fails_integrity(tmp_path):
+    """Antes del fix, cambiar sólo el contenido de un literal ("A B" -> "AB")
+    era invisible para la comparación (F07-A): normalizaba dentro de comillas."""
+    targets = [("REMASEP_OD", "B10", 1)]
+    pending = _pw(targets)
+
+    def mutate(m: FakeWorkbookModel) -> None:
+        m.formula_map[("CONTROL", "E16")] = '=IF(D16="AB",E7+E8,0)'
+
+    model = _model(
+        targets,
+        formula_map={("CONTROL", "E16"): '=IF(D16="A B",E7+E8,0)'},
+        mutate_after_save=mutate,
+    )
+    result, _request, _ = _generate(tmp_path, pending, model)
+    assert result.status == w.STATUS_FAILED_INTEGRITY_CHECK
+    assert result.formula_integrity.ok is False
+    assert ("CONTROL", "E16") in result.formula_integrity.expression_changes
+
+
+def test_write_zero_missing_after_save_fails_target_verification(tmp_path):
+    """F07-B: un PendingWrite=0 cuya celda queda ausente tras guardar (no un 0
+    explícito) no puede reportarse como escritura correcta."""
+    targets = [("REMASEP_OD", "B10", 0)]
+    pending = _pw(targets)
+
+    def mutate(m: FakeWorkbookModel) -> None:
+        del m.values[("REMASEP_OD", "B10")]
+
+    model = _model(targets, mutate_after_save=mutate)
+    result, _request, _ = _generate(tmp_path, pending, model)
+    assert result.status == w.STATUS_FAILED_INTEGRITY_CHECK
+    assert result.target_verification.ok is False
+    assert result.target_verification.checks[0].status == "MISSING"
+
+
+def test_write_zero_present_after_save_passes_target_verification(tmp_path):
+    targets = [("REMASEP_OD", "B10", 0)]
+    pending = _pw(targets)
+    result, _, _ = _generate(tmp_path, pending, _model(targets))
+    assert result.target_verification.ok is True
+    assert result.target_verification.checks[0].status == "OK"
 
 
 def test_vba_lost_fails_integrity(tmp_path):
@@ -494,18 +621,57 @@ def test_cleanup_refuses_to_delete_outside_its_workspace(tmp_path):
     assert outside.exists()  # no se borró nada ajeno
 
 
+def test_reservation_is_released_when_workspace_creation_fails(tmp_path, monkeypatch):
+    targets = [("REMASEP_OD", "B10", 1)]
+    pending = _pw(targets)
+    request = _request(tmp_path, pending)
+    harness = FakeWriterHarness(_model(targets))
+
+    def fail_workspace(*_args, **_kwargs):
+        raise OSError("workspace unavailable")
+
+    monkeypatch.setattr(w, "create_run_workspace", fail_workspace)
+    result = w.generate(
+        request,
+        pending,
+        open_writer=harness.open_writer,
+        control_map=_CONTROL_MAP,
+        inspect=harness.inspect,
+    )
+
+    assert result.status == w.STATUS_GENERATION_FAILED
+    assert not w._reservation_path(request.output_path).exists()
+
+
+def test_reservation_is_released_when_writer_raises(tmp_path):
+    targets = [("REMASEP_OD", "B10", 1)]
+    pending = _pw(targets)
+    request = _request(tmp_path, pending)
+    harness = FakeWriterHarness(_model(targets), fail_during_write=True)
+
+    result = w.generate(
+        request,
+        pending,
+        open_writer=harness.open_writer,
+        control_map=_CONTROL_MAP,
+        inspect=harness.inspect,
+    )
+
+    assert result.status == w.STATUS_GENERATION_FAILED
+    assert not w._reservation_path(request.output_path).exists()
+
+
 def test_atomic_promote_retries_then_raises(monkeypatch):
     calls = {"n": 0}
 
-    class _P:
-        def replace(self, _dst):
-            calls["n"] += 1
-            raise PermissionError("bloqueado")
-        name = "x.xlsm"
+    def blocked_link(_src, _dst):
+        calls["n"] += 1
+        raise PermissionError("bloqueado")
 
     monkeypatch.setattr(w, "_sleep", lambda _s: None)
+    monkeypatch.setattr(w.os, "link", blocked_link)
     with pytest.raises(w.ExcelWriterError):
-        w._atomic_promote(_P(), Path("x.xlsm"))
+        w._atomic_promote(Path("working.xlsm"), Path("x.xlsm"))
     assert calls["n"] == w._PROMOTE_ATTEMPTS  # acotado, sin loop infinito
 
 
@@ -513,17 +679,17 @@ def test_atomic_promote_succeeds_after_transient_lock(tmp_path, monkeypatch):
     src = tmp_path / "src.xlsm"
     src.write_bytes(b"data")
     dst = tmp_path / "dst.xlsm"
-    real_replace = Path.replace
+    real_link = w.os.link
     state = {"fails": 2}
 
-    def flaky(self, target):
+    def flaky(source, target):
         if state["fails"] > 0:
             state["fails"] -= 1
             raise PermissionError("transient")
-        return real_replace(self, target)
+        return real_link(source, target)
 
     monkeypatch.setattr(w, "_sleep", lambda _s: None)
-    monkeypatch.setattr(Path, "replace", flaky)
+    monkeypatch.setattr(w.os, "link", flaky)
     w._atomic_promote(src, dst)
     assert dst.read_bytes() == b"data"
 
@@ -532,12 +698,20 @@ def test_no_process_killing_in_codebase():
     """El writer nunca mata procesos ni fuerza borrados globales: no hay
     ``subprocess`` / ``os.system`` / ``os.kill`` / ``psutil`` ni comandos de
     kill como literales de string. (Las MENCIONES en docstrings de que NO se
-    hace esto están permitidas y se ignoran.)"""
+    hace esto están permitidas y se ignoran.)
+
+    Excepción nombrada: ``scripts/validate_af_age_excel_com.py`` (validación
+    histórica AF vs Excel COM) sí importa ``subprocess`` para invocar
+    ``powershell.exe`` como puente COM aislado — no reintroduce ningún riesgo
+    de matar procesos: sigue sujeto a **todos** los demás chequeos de este
+    test (``banned_strings``/``banned_calls``), sólo se exime la línea de
+    import en sí."""
     import ast
 
     root = Path(__file__).resolve().parent.parent
     banned_strings = ("taskkill", "stop-process", "pkill", "killall", "/f /im")
     banned_calls = {("os", "system"), ("os", "kill"), ("os", "popen")}
+    subprocess_import_allowlist = {"validate_af_age_excel_com.py"}
     hits: list[str] = []
     for py in list((root / "src").rglob("*.py")) + list((root / "scripts").rglob("*.py")):
         tree = ast.parse(py.read_text(encoding="utf-8"), filename=str(py))
@@ -547,16 +721,21 @@ def test_no_process_killing_in_codebase():
             for n in ast.walk(tree)
             if isinstance(n, ast.Expr) and isinstance(n.value, ast.Constant)
         }
+        allow_subprocess_import = py.name in subprocess_import_allowlist
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
                 for alias in node.names:
-                    if alias.name.split(".")[0] in {"subprocess", "psutil"}:
+                    root_name = alias.name.split(".")[0]
+                    if root_name == "subprocess" and allow_subprocess_import:
+                        continue
+                    if root_name in {"subprocess", "psutil"}:
                         hits.append(f"{py.name}: import {alias.name}")
             elif isinstance(node, ast.ImportFrom) and (node.module or "").split(".")[0] in {
                 "subprocess",
                 "psutil",
             }:
-                hits.append(f"{py.name}: from {node.module}")
+                if not ((node.module or "").split(".")[0] == "subprocess" and allow_subprocess_import):
+                    hits.append(f"{py.name}: from {node.module}")
             elif (
                 isinstance(node, ast.Constant)
                 and isinstance(node.value, str)

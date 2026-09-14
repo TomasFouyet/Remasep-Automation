@@ -136,6 +136,97 @@ def test_com_open_write_recalc_save_reopen(tmp_path):
     )
 
 
+_WORKBOOK_OPEN_FIXTURE = (
+    Path(__file__).resolve().parent / "fixtures" / "synthetic_workbook_open.xlsm"
+)
+_MARKER_CELL = "A1"
+_MARKER_VALUE = "MARKER_FIRED"
+
+
+def test_workbook_open_macro_does_not_fire_through_our_adapter(tmp_path):
+    """F06 — ensayo Windows con un workbook SINTÉTICO y benigno, sin PII.
+
+    Usa un fixture PRE-CONSTRUIDO (``tests/fixtures/synthetic_workbook_open.xlsm``,
+    generado una sola vez con ``scripts/build_workbook_open_fixture.py``) en
+    vez de escribir VBA por código en cada corrida — así el test no depende,
+    en tiempo de ejecución, de "Trust access to the VBA project object
+    model" (esa opción sólo hizo falta UNA VEZ, offline, para construir el
+    fixture; REMASEP en producción nunca la necesita ni la toca). Si el
+    fixture no existe todavía en esta máquina, el test se salta con la
+    instrucción exacta para generarlo — no se fabrica un PASS.
+
+    Dos partes, sobre copias independientes del fixture (nunca se modifica
+    el original):
+
+    A) CONTROL — se abre sin nuestra política (Excel con su comportamiento
+       por defecto vía Automation). Si el marcador NO aparece aquí tampoco,
+       el test es inconcluyente (no vacuously-pass): se reporta así, sin
+       afirmar que la política F06 funcionó.
+    B) vía ``ExcelSession``/``open_excel_com_writer`` (AutomationSecurity=
+       ForceDisable + EnableEvents=False): el marcador debe estar ausente.
+    """
+    _skip_if_no_excel()
+    if not _WORKBOOK_OPEN_FIXTURE.is_file():
+        pytest.skip(
+            "falta tests/fixtures/synthetic_workbook_open.xlsm — generarlo una "
+            "vez en una máquina Windows con Excel: "
+            "python scripts/build_workbook_open_fixture.py"
+        )
+
+    import pythoncom
+    import win32com.client
+
+    from remasep.adapters.excel_com import open_excel_com_writer
+
+    # --- A) control: apertura SIN nuestra política ----------------------
+    control_copy = tmp_path / "control_no_policy.xlsm"
+    shutil.copy2(_WORKBOOK_OPEN_FIXTURE, control_copy)
+
+    pythoncom.CoInitialize()
+    app = win32com.client.DispatchEx("Excel.Application")
+    app.Visible = False
+    app.DisplayAlerts = False
+    try:
+        wb = app.Workbooks.Open(str(control_copy.resolve()))
+        sheet_name = wb.Sheets(1).Name
+        control_observed = wb.Sheets(1).Range(_MARKER_CELL).Value
+        wb.Close(SaveChanges=False)
+    finally:
+        app.Quit()
+        pythoncom.CoUninitialize()
+
+    control_fired = control_observed == _MARKER_VALUE
+    print(
+        f"[com-int] (A) control sin política: marcador "
+        f"{'SÍ' if control_fired else 'NO'} se disparó (observado={control_observed!r})"
+    )
+    if not control_fired:
+        pytest.skip(
+            "el control (sin nuestra política) tampoco disparó el marcador — "
+            "probablemente otra capa (Trust Center/Protected View de esta "
+            "máquina) ya lo bloquea por su cuenta; el test es inconcluyente, "
+            "no se puede demostrar que nuestra política sea la causa de que "
+            "el marcador esté ausente en la parte B"
+        )
+
+    # --- B) vía nuestro adapter (política F06 activa) --------------------
+    protected_copy = tmp_path / "via_excel_session.xlsm"
+    shutil.copy2(_WORKBOOK_OPEN_FIXTURE, protected_copy)
+
+    with open_excel_com_writer(protected_copy) as writer:
+        protected_observed = writer.read_cell(sheet_name, _MARKER_CELL)
+
+    print(
+        f"[com-int] (B) vía ExcelSession: marcador "
+        f"{'SÍ' if protected_observed == _MARKER_VALUE else 'NO'} se disparó "
+        f"(observado={protected_observed!r})"
+    )
+    assert protected_observed != _MARKER_VALUE, (
+        "Workbook_Open se ejecutó pese a AutomationSecurity=ForceDisable + "
+        "EnableEvents=False: revisar la política de ExcelSession (excel_com.py)"
+    )
+
+
 def test_com_capability_probe_is_stable_across_repeats():
     """Llamadas repetidas a ``detect_excel_capability(probe_com=True)`` no dejan
     procesos huérfanos ni degradan (misma versión, sin excepciones)."""

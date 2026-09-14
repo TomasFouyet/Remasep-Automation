@@ -27,6 +27,13 @@ legacy pasa a ser exclusivamente material de desarrollo.
 | `zero_policy.yaml` | `resolution: WRITE_ZERO` (evidence-derived en 3.7A) | no |
 | `estado_filter.yaml` | regla ESTADO **`CONFIRMED`** (Sprint 3.9 fase 2): `included_states` / `excluded_states`, `normalization: strip_casefold` | no |
 
+El cálculo también necesita
+`config/legacy_current_logic_2026/rules.yaml`, cuyo árbol mantiene ownership y
+versión propios. PyInstaller incluye explícitamente ese directorio junto con
+`runtime_2026` y `excel_writer_2026`; los tres se localizan mediante
+`resolve_config_dir()`, con prioridad para `sys._MEIPASS`. `bundle.yaml` declara
+esta dependencia y su SHA-256, que se valida antes de calcular.
+
 **Ausencia de PII confirmada**: los assets contienen sólo reglas, mappings, IDs
 y metadatos estructurales. No hay nombres, RUT, fechas de nacimiento
 individuales, prestaciones individuales, filas de Medinet ni valores mensuales.
@@ -95,14 +102,16 @@ y un mensaje legible para el usuario ("La instalación no contiene los archivos
 internos necesarios para generar el informe."). Nunca un `FileNotFoundError`
 crudo. El detalle técnico va aparte.
 
-## Packaging (PyInstaller — a futuro)
+## Packaging (PyInstaller)
 
-`resolve_runtime_root()` localiza `config/runtime_2026/` sin depender del
+`resolve_config_dir()` localiza los tres árboles productivos sin depender del
 *current working directory*: primero `sys._MEIPASS` (bundle PyInstaller), luego
-subiendo desde el módulo hasta encontrar `config/runtime_2026/bundle.yaml`.
-Cuando se empaquete el `.exe` habrá que incluir el directorio:
+subiendo desde el módulo. `packaging/remasep.spec` los incluye en el layout
+ONEDIR. El smoke exige todos los YAML/CSV necesarios, incluidas las reglas, y el
+test de distribución aislada ejecuta el pipeline sobre una fixture sintética:
+debe obtener exactamente 1122 `PendingWrite` con completitud verdadera.
 
-    pyinstaller ... --add-data "config/runtime_2026:config/runtime_2026"
+    pyinstaller packaging/remasep.spec --noconfirm
 
 ## Regenerar los assets (dev)
 

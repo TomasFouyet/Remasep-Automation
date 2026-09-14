@@ -90,33 +90,44 @@ class RuntimeAssetError(RemasepError):
 # ---------------------------------------------------------------------------
 
 
-def resolve_runtime_root(explicit: str | Path | None = None) -> Path:
-    """Localiza ``config/runtime_2026/`` sin depender del *current working dir*.
+def resolve_config_dir(
+    name: str,
+    required_file: str,
+    explicit: str | Path | None = None,
+) -> Path:
+    """Localiza un directorio versionado de ``config`` dentro o fuera del bundle.
 
     Orden: ``explicit`` → bundle PyInstaller (``sys._MEIPASS``) → subiendo desde
-    este módulo hasta encontrar ``config/<RUNTIME_DIR_NAME>``.
+    este módulo hasta encontrar ``config/<name>``. Todos los assets productivos
+    usan este mismo mecanismo para que el checkout no enmascare omisiones del
+    paquete.
     """
     if explicit is not None:
         root = Path(explicit)
-        if root.is_dir():
+        if (root / required_file).is_file():
             return root
         raise RuntimeAssetError(RUNTIME_ASSET_MISSING, f"no existe el directorio {root}")
 
     candidates: list[Path] = []
     meipass = getattr(sys, "_MEIPASS", None)
     if meipass:
-        candidates.append(Path(meipass) / "config" / RUNTIME_DIR_NAME)
+        candidates.append(Path(meipass) / "config" / name)
     here = Path(__file__).resolve()
     for parent in here.parents:
-        candidates.append(parent / "config" / RUNTIME_DIR_NAME)
+        candidates.append(parent / "config" / name)
 
     for cand in candidates:
-        if (cand / _BUNDLE_FILE).is_file():
+        if (cand / required_file).is_file():
             return cand
     raise RuntimeAssetError(
         RUNTIME_ASSET_MISSING,
-        f"no se encontró config/{RUNTIME_DIR_NAME}/{_BUNDLE_FILE}",
+        f"no se encontró config/{name}/{required_file}",
     )
+
+
+def resolve_runtime_root(explicit: str | Path | None = None) -> Path:
+    """Localiza ``config/runtime_2026/`` sin depender del *current working dir*."""
+    return resolve_config_dir(RUNTIME_DIR_NAME, _BUNDLE_FILE, explicit)
 
 
 def _sha256(path: Path) -> str:
@@ -201,6 +212,8 @@ class RuntimeBundle:
     expected_instruction_count: int
     zero_write_policy: str
     estado_filter: EstadoFilterRule
+    legacy_rules_path: str
+    legacy_rules_sha256: str
     asset_sha256: dict[str, str] = field(default_factory=dict)
 
     @property
@@ -423,6 +436,23 @@ def load_runtime_bundle(root: str | Path | None = None) -> RuntimeBundle:
     manifest = _read_manifest(runtime_root / doc.get("write_manifest", "write_manifest.csv"))
     catalog = _read_catalog(runtime_root / doc.get("metric_catalog", "metric_catalog.csv"))
 
+    legacy_doc = doc.get("legacy_rules") or {}
+    if not isinstance(legacy_doc, dict):
+        raise RuntimeAssetError(RUNTIME_ASSET_INVALID, "bundle.yaml: legacy_rules inválido")
+    legacy_dir_name = str(legacy_doc.get("config_dir", "legacy_current_logic_2026"))
+    legacy_file_name = str(legacy_doc.get("file", "rules.yaml"))
+    legacy_expected_sha = str(legacy_doc.get("sha256", ""))
+    if not legacy_expected_sha:
+        raise RuntimeAssetError(RUNTIME_ASSET_INVALID, "bundle.yaml: falta sha256 de legacy_rules")
+    legacy_root = resolve_config_dir(legacy_dir_name, legacy_file_name)
+    legacy_path = _require(legacy_root / legacy_file_name)
+    legacy_actual_sha = _sha256(legacy_path)
+    if legacy_actual_sha != legacy_expected_sha:
+        raise RuntimeAssetError(
+            RUNTIME_ASSET_INVALID,
+            f"{legacy_dir_name}/{legacy_file_name}: sha256 no coincide",
+        )
+
     bundle = RuntimeBundle(
         version=str(doc.get("version", RUNTIME_DIR_NAME)),
         root=str(runtime_root),
@@ -435,6 +465,8 @@ def load_runtime_bundle(root: str | Path | None = None) -> RuntimeBundle:
         expected_instruction_count=int(doc.get("expected_instruction_count", len(manifest))),
         zero_write_policy=str(zero_doc.get("resolution", "UNRESOLVED")),
         estado_filter=estado_filter,
+        legacy_rules_path=str(legacy_path),
+        legacy_rules_sha256=legacy_actual_sha,
         asset_sha256=asset_sha,
     )
     top_level_status = doc.get("estado_filter_status")

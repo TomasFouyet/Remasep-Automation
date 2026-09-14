@@ -17,6 +17,7 @@ from pathlib import Path
 from PySide6.QtCore import QMarginsF, QRectF, Qt
 from PySide6.QtGui import QFont, QPageLayout, QPageSize, QPainter, QPdfWriter
 
+from remasep.core.errors import RemasepError
 from remasep.services.medinet_summary import MonthlyMedinetSummary
 from remasep.ui.charts import Bar, draw_bar_chart
 from remasep.ui.styles import THEME, format_int
@@ -27,6 +28,10 @@ _DISCLAIMER = (
     "Este resumen corresponde únicamente a datos provenientes de Medinet y no "
     "representa todavía la totalidad del informe REMASEP."
 )
+
+
+class PdfExportError(RemasepError):
+    """El dispositivo de PDF no produjo un archivo que pueda declararse válido."""
 
 
 @dataclass(frozen=True)
@@ -83,7 +88,7 @@ def report_content(s: MonthlyMedinetSummary) -> ReportContent:
         period=s.period_label,
         kpis=(
             _Kpi("Citas del período", format_int(s.period_scope_records),
-                 "Válidas dentro del mes"),
+                 "Válidas e inválidas detectadas"),
             _Kpi("Consideradas para REMASEP", format_int(s.included_records),
                  "Sólo estados confirmados"),
             _Kpi("Excluidas por estado", format_int(s.excluded_records),
@@ -113,24 +118,44 @@ def report_content(s: MonthlyMedinetSummary) -> ReportContent:
 
 
 def export_summary_pdf(summary: MonthlyMedinetSummary, path: str | Path) -> Path:
-    """Escribe el PDF de una página. Devuelve la ruta. No sobrescribe."""
+    """Escribe un PDF verificable de una página. Devuelve la ruta. No sobrescribe."""
     out = Path(path)
     if out.exists():
         raise FileExistsError(f"ya existe un archivo en {out}")
-    out.parent.mkdir(parents=True, exist_ok=True)
-
-    content = report_content(summary)
-    writer = QPdfWriter(str(out))
-    writer.setResolution(150)
-    writer.setPageSize(QPageSize(QPageSize.PageSizeId.A4))
-    writer.setPageMargins(QMarginsF(16, 14, 16, 14), QPageLayout.Unit.Millimeter)
-    writer.setTitle(f"Resumen mensual Medinet — {summary.period_label}")
-
-    painter = QPainter(writer)
     try:
-        _paint(painter, content)
-    finally:
-        painter.end()
+        out.parent.mkdir(parents=True, exist_ok=True)
+        content = report_content(summary)
+        writer = QPdfWriter(str(out))
+        writer.setResolution(150)
+        writer.setPageSize(QPageSize(QPageSize.PageSizeId.A4))
+        writer.setPageMargins(QMarginsF(16, 14, 16, 14), QPageLayout.Unit.Millimeter)
+        writer.setTitle(f"Resumen mensual Medinet — {summary.period_label}")
+
+        painter = QPainter()
+        if not painter.begin(writer) or not painter.isActive():
+            raise PdfExportError("No se pudo iniciar el dispositivo para crear el PDF.")
+        painted = False
+        try:
+            _paint(painter, content)
+            painted = True
+        finally:
+            ended = painter.end()
+        if not painted or not ended:
+            raise PdfExportError("No se pudo finalizar la escritura del PDF.")
+
+        if not out.is_file():
+            raise PdfExportError("El dispositivo terminó sin crear el archivo PDF.")
+        raw = out.read_bytes()
+        if not raw or not raw.startswith(b"%PDF-") or not raw.rstrip().endswith(b"%%EOF"):
+            raise PdfExportError("El archivo PDF generado está vacío o incompleto.")
+    except FileExistsError:
+        raise
+    except PdfExportError:
+        out.unlink(missing_ok=True)
+        raise
+    except Exception as exc:
+        out.unlink(missing_ok=True)
+        raise PdfExportError(f"No se pudo crear o escribir el PDF: {exc}") from exc
     return out
 
 

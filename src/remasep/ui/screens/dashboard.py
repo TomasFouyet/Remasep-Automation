@@ -26,6 +26,7 @@ from remasep.services.medinet_summary import MonthlyMedinetSummary
 from remasep.ui.charts import Bar, BarChartCard
 from remasep.ui.components.step_indicator import StepIndicator
 from remasep.ui.components.widgets import Card, MetricCard, SectionHeader, StatusBadge
+from remasep.ui.operation_lifecycle import OperationKind
 from remasep.ui.pdf_report import export_summary_pdf, suggested_pdf_name
 from remasep.ui.styles import THEME
 
@@ -62,8 +63,15 @@ class DashboardScreen(QWidget):
         disclaimer.setProperty("role", "faint")
         disclaimer.setWordWrap(True)
 
+        self._validation_warning = QLabel()
+        self._validation_warning.setObjectName("bannerError")
+        self._validation_warning.setWordWrap(True)
+        self._validation_warning.setVisible(False)
+
         # --- KPIs ---
-        self.kpi_period = MetricCard("Citas del período", hint="Válidas dentro del mes")
+        self.kpi_period = MetricCard(
+            "Citas del período", hint="Válidas e inválidas detectadas dentro del mes"
+        )
         self.kpi_included = MetricCard(
             "Consideradas para REMASEP", hint="Sólo estados confirmados", accent=True
         )
@@ -113,6 +121,7 @@ class DashboardScreen(QWidget):
         content_layout.setContentsMargins(0, 0, 8, 0)
         content_layout.setSpacing(THEME.gap_lg)
         content_layout.addLayout(kpi_row)
+        content_layout.addWidget(self._validation_warning)
         content_layout.addLayout(charts)
         content_layout.addWidget(self._pending_card)
         content_layout.addStretch()
@@ -131,6 +140,7 @@ class DashboardScreen(QWidget):
         self.generate_button = QPushButton("Generar REMASEP")
         self.generate_button.setProperty("variant", "primary")
         self.generate_button.clicked.connect(lambda: self._app.navigate("generate"))
+        self._app.operations.operation_finished.connect(self._sync_generate_button)
 
         actions = QHBoxLayout()
         actions.addWidget(self.back_button)
@@ -164,6 +174,18 @@ class DashboardScreen(QWidget):
         self.kpi_excluded.set_value(s.excluded_records)
         self.kpi_ratio.set_value(f"{s.included_percentage:g}%")
         self.kpi_ratio.set_hint(s.considered_ratio_label)
+        if s.validation_blocked:
+            noun = "registro inválido" if s.invalid_records == 1 else "registros inválidos"
+            self._validation_warning.setText(
+                f"No se puede generar el REMASEP: hay {s.invalid_records} {noun} "
+                "relevante(s) para este período. Corrige el archivo de Medinet y vuelve "
+                "a analizarlo. Ningún registro inválido fue contado."
+            )
+            self._validation_warning.setVisible(True)
+        else:
+            self._validation_warning.clear()
+            self._validation_warning.setVisible(False)
+        self._sync_generate_button()
 
         self.chart_estado.set_bars([
             Bar(e.label, e.count, THEME.chart_included if e.included else THEME.chart_excluded)
@@ -181,6 +203,16 @@ class DashboardScreen(QWidget):
             row = QLabel(f"•  {name}")
             row.setProperty("role", "muted")
             self._pending_list.addWidget(row)
+
+    def _sync_generate_button(self, *_args) -> None:
+        summary = self._app.state.summary
+        validation_blocked = summary is None or summary.validation_blocked
+        generation_running = self._app.operations.has_running(OperationKind.GENERATION)
+        self.generate_button.setEnabled(not validation_blocked and not generation_running)
+        if generation_running:
+            self.generate_button.setToolTip("Ya hay una generación en curso.")
+        else:
+            self.generate_button.setToolTip("")
 
     # --- PDF ----------------------------------------------------
 

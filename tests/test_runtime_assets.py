@@ -45,6 +45,10 @@ def test_committed_bundle_loads_and_validates():
     assert bundle.estado_filter.excluded_states == (
         "Cancelado", "No Se Presenta", "Agendado", "Confirmado", "Re-Agendado",
     )
+    assert Path(bundle.legacy_rules_path).name == "rules.yaml"
+    assert bundle.legacy_rules_sha256 == (
+        "f12abf80a783c40dfc106e398ac4ad40ba7a9340a8b5bcf994a672e5c42ee2a3"
+    )
     # el catálogo cubre las 1122 + dependencias transitivas
     assert len(bundle.formula_index) >= 1122
     for w in bundle.write_instructions:
@@ -56,6 +60,19 @@ def test_resolve_runtime_root_is_not_cwd_dependent(tmp_path, monkeypatch):
     root = resolve_runtime_root()
     assert (root / "bundle.yaml").is_file()
     assert root.name == "runtime_2026"
+
+
+def test_resolve_runtime_root_uses_meipass_bundle_when_frozen(tmp_path, monkeypatch):
+    """Simula un build PyInstaller: sys._MEIPASS apunta al bundle onedir."""
+    bundle_root = tmp_path / "_internal"
+    target = bundle_root / "config" / "runtime_2026"
+    target.mkdir(parents=True)
+    (target / "bundle.yaml").write_text("version: fake\n", encoding="utf-8")
+
+    monkeypatch.setattr("sys._MEIPASS", str(bundle_root), raising=False)
+    monkeypatch.chdir(tmp_path)
+    root = resolve_runtime_root()
+    assert root == target
 
 
 def test_bundle_exposes_producer_interfaces():

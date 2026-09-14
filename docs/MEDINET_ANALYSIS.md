@@ -116,6 +116,15 @@ Se usa el mes/año elegido en la UI. Para los registros **válidos**:
 `max_service_date`. Los registros fuera de período **no se descartan**; se emite
 un `ValidationResult` `warning` (o `error` si no hay ningún registro del período).
 
+La ruta productiva usa `select_period_records()` como contrato compartido entre
+resumen y generación. `period_scope_records` incluye válidos e inválidos
+relevantes, mientras que `processing_scope_records` contiene sólo válidos: un
+inválido nunca se cuenta ni se completa con valores inventados. Una fila inválida
+con `DIA_CITA` válida pertenece sólo a ese mes; si `DIA_CITA` no puede
+interpretarse, no es asignable a un mes y bloquea conservadoramente la generación.
+Los diagnósticos que salen de esta capa son únicamente códigos y cantidades
+agregadas, sin valores de celdas ni PII.
+
 ### Edad — `legacy_age_years(birth, service)`
 
 Años completos cumplidos a la fecha de atención, equivalente a

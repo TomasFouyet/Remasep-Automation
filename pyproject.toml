@@ -22,6 +22,11 @@ dev = [
     "pytest>=8,<9",
     "ruff>=0.9",
 ]
+# Sólo para construir el ejecutable Windows (Sprint 3.11). NO es una
+# dependencia de runtime del usuario final: el .exe empaquetado no lo incluye.
+build = [
+    "pyinstaller>=6,<7",
+]
 
 [project.scripts]
 remasep = "remasep.main:main"

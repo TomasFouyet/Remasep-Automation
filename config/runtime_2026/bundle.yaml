@@ -11,6 +11,10 @@ metric_catalog: metric_catalog.csv
 detail_contract: detail_contract.yaml
 zero_policy: zero_policy.yaml
 estado_filter: estado_filter.yaml
+legacy_rules:
+  config_dir: legacy_current_logic_2026
+  file: rules.yaml
+  sha256: f12abf80a783c40dfc106e398ac4ad40ba7a9340a8b5bcf994a672e5c42ee2a3
 assets:
   write_manifest.csv: 90967ee71e598dd24ab424565b1521fd9373c9178dfdfa6535929abc92ba6417
   metric_catalog.csv: b2c70f388211049932ef029a2797a9248e27d03c0a35674640a86a6c58f51ea5

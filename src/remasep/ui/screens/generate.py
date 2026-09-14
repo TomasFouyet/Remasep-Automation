@@ -8,7 +8,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QThread
 from PySide6.QtWidgets import (
     QFileDialog,
     QHBoxLayout,
@@ -22,8 +21,13 @@ from PySide6.QtWidgets import (
 
 from remasep.ui.components.step_indicator import StepIndicator
 from remasep.ui.components.widgets import Card, ErrorBanner, StatusBadge
-from remasep.ui.errors import HumanError
+from remasep.ui.errors import HumanError, describe_control_status, humanize_generation_warning
 from remasep.ui.open_location import open_containing_folder, open_path
+from remasep.ui.operation_lifecycle import (
+    OperationKind,
+    OperationSnapshot,
+    StartResult,
+)
 from remasep.ui.styles import format_int
 from remasep.ui.workers import GENERATION_STEPS, GenerationOutcome, GenerationWorker, run_generation
 
@@ -41,8 +45,7 @@ class GenerateScreen(QWidget):
     def __init__(self, app: QWidget) -> None:
         super().__init__()
         self._app = app
-        self._thread: QThread | None = None
-        self._worker: GenerationWorker | None = None
+        self._run_id: str | None = None
         self._output_path: str | None = None
         self._last_human: HumanError | None = None
 
@@ -180,24 +183,35 @@ class GenerateScreen(QWidget):
 
     def _start(self) -> None:
         state = self._app.state
-        out = str(state.output_path) if state.output_path is not None else None
-        self._thread = QThread(self)
-        self._worker = GenerationWorker(
-            state.medinet_path, state.period, state.template_path, out
+        operation = OperationSnapshot.create(
+            operation_type=OperationKind.GENERATION,
+            period=state.period,
+            input_path=state.medinet_path,
+            template_path=state.template_path,
+            output_path=state.output_path,
         )
-        self._worker.moveToThread(self._thread)
-        self._thread.started.connect(self._worker.run)
-        self._worker.step.connect(self._on_step)
-        self._worker.done.connect(self._on_done)
-        self._worker.failed.connect(self._on_failed)
-        self._thread.start()
+        started = self._app.operations.start(
+            operation,
+            GenerationWorker,
+            on_step=lambda _op, text, index, total: self._on_step(text, index, total),
+            on_done=lambda op, outcome: self._on_done(outcome, period=op.period),
+            on_failed=lambda _op, human: self._on_failed(human),
+        )
+        if started is StartResult.STARTED:
+            self._run_id = operation.run_id
+            return
+        self._show_error(
+            HumanError(
+                "Ya hay una generación en curso.",
+                "La generación anterior debe terminar antes de iniciar otra.",
+                "Volver al resumen",
+            )
+        )
 
     def _teardown(self) -> None:
-        if self._thread is not None:
-            self._thread.quit()
-            self._thread.wait(5000)
-            self._thread = None
-            self._worker = None
+        if self._run_id is not None:
+            self._app.operations.cancel(self._run_id)
+            self._run_id = None
 
     # --- señales ------------------------------------------------
 
@@ -205,13 +219,13 @@ class GenerateScreen(QWidget):
         self._status_label.setText(text)
         self._bar.setValue(min(index + 1, total))
 
-    def _on_done(self, outcome: GenerationOutcome) -> None:
+    def _on_done(self, outcome: GenerationOutcome, *, period=None) -> None:
         self._teardown()
         self._app.state.generation = outcome
         if not outcome.ok:
             self._show_error(outcome.human_error)
             return
-        self._show_result(outcome)
+        self._show_result(outcome, period=period)
 
     def _on_failed(self, human: HumanError) -> None:
         self._teardown()
@@ -227,7 +241,7 @@ class GenerateScreen(QWidget):
         self._heading.setText("No se pudo generar el informe")
         self._error.show_error(human.title, human.detail, human.action_label)
 
-    def _show_result(self, o: GenerationOutcome) -> None:
+    def _show_result(self, o: GenerationOutcome, *, period=None) -> None:
         self._progress_card.setVisible(False)
         self._heading.setText("Generación completada")
         self._output_path = o.output_path
@@ -236,9 +250,10 @@ class GenerateScreen(QWidget):
             if item.widget():
                 item.widget().deleteLater()
         name = Path(o.output_path).name if o.output_path else "—"
+        _, control_text = describe_control_status(o.control_status)
         rows = [
             ("Nombre del archivo", name),
-            ("Período", self._app.state.period.label),
+            ("Período", (period or self._app.state.period).label),
             ("Atenciones consideradas", format_int(o.considered_records)),
             ("Integridad del archivo", "Correcta" if o.integrity_ok else "Con observaciones"),
         ]
@@ -246,6 +261,14 @@ class GenerateScreen(QWidget):
             line = QLabel(f"{label}:  {value}")
             line.setProperty("role", "muted")
             self._result_lines.addWidget(line)
+        control_line = QLabel(control_text)
+        control_line.setWordWrap(True)
+        self._result_lines.addWidget(control_line)
+        for code in o.warnings:
+            warn_line = QLabel("⚠ " + humanize_generation_warning(code))
+            warn_line.setProperty("role", "muted")
+            warn_line.setWordWrap(True)
+            self._result_lines.addWidget(warn_line)
         self._open_excel.setEnabled(bool(o.output_path))
         self._open_folder.setEnabled(bool(o.output_path))
         self._result_card.setVisible(True)

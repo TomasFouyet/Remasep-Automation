@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
+
+import yaml
 
 from remasep.services import excel_writer as w
 from remasep.services.generation_service import GenerationService
@@ -10,7 +13,26 @@ from remasep.services.metric_value_producer import PendingWrite
 from remasep.testing import FakeWorkbookModel, FakeWriterHarness
 
 FP = "stf:dc624775927d4d4d"
-SHEETS = ["REMASEP_OD", "REMASEP 01", "B2 ANEXO", "CONTROL"]
+SHEETS = [
+    "NOMBRE", "REMASEP 01", "URGENCIAS", "REMASEP B1", "B2 ANEXO",
+    "REMASEP_OD", "EyP_ET", "TV_MI", "SERV_SANGRE", "CONTROL",
+]
+
+# GenerationService() con config_dir por defecto usa la política REAL de
+# producción, contrato semántico (F02) incluido: el formula_map sintético
+# debe conservar TODAS las fórmulas estáticas certificadas para no disparar
+# TEMPLATE_SEMANTIC_CONTRACT_VIOLATION.
+_EXCEL_WRITER_CONFIG_DIR = (
+    Path(__file__).resolve().parents[1] / "config" / "excel_writer_2026"
+)
+_SEMANTIC_CONTRACT_PATH = _EXCEL_WRITER_CONFIG_DIR / "template_semantic_contract.yaml"
+_REAL_CONTRACT = w.load_template_semantic_contract(
+    yaml.safe_load(_SEMANTIC_CONTRACT_PATH.read_text(encoding="utf-8")),
+    base_dir=_EXCEL_WRITER_CONFIG_DIR,
+)
+_CRITICAL_FORMULAS = {
+    (cf.sheet, cf.cell): cf.formula for cf in _REAL_CONTRACT.critical_formulas
+}
 
 
 def _pending():
@@ -25,7 +47,7 @@ def _pending():
 def _model(pending):
     return FakeWorkbookModel(
         sheet_names=list(SHEETS),
-        formula_map={("CONTROL", "E16"): "=E6"},
+        formula_map=dict(_CRITICAL_FORMULAS),
         values={("CONTROL", "E16"): 0},
         writable_cells={(p.target_sheet, p.target_cell) for p in pending},
         structural_fingerprint_id=FP,

@@ -30,16 +30,18 @@ from remasep.services.excel_writer import (
     ControlMap,
     GenerationRequest,
     GenerationResult,
+    TemplateSemanticContract,
     WorkbookSnapshot,
     WorkbookWriter,
     build_write_audit,
     load_control_map,
+    load_template_semantic_contract,
     plan_output_paths,
     snapshot_from_path,
 )
 from remasep.services.metric_value_producer import PendingWrite
+from remasep.services.runtime_assets import resolve_config_dir
 
-_DEFAULT_CONFIG_DIR = Path("config/excel_writer_2026")
 _DEFAULT_ARTIFACTS_DIR = Path("artifacts/excel_writer")
 _FALLBACK_FINGERPRINT = "stf:dc624775927d4d4d"
 
@@ -87,10 +89,14 @@ class GenerationService:
     def __init__(
         self,
         *,
-        config_dir: Path = _DEFAULT_CONFIG_DIR,
+        config_dir: Path | None = None,
         artifacts_dir: Path = _DEFAULT_ARTIFACTS_DIR,
     ) -> None:
-        self._config_dir = Path(config_dir)
+        self._config_dir = (
+            Path(config_dir)
+            if config_dir is not None
+            else resolve_config_dir("excel_writer_2026", "policy.yaml")
+        )
         self._artifacts_dir = Path(artifacts_dir)
 
     # -- configuración ------------------------------------------------
@@ -101,11 +107,28 @@ class GenerationService:
         return yaml.safe_load(path.read_text(encoding="utf-8")) or {}
 
     def _control_map(self, policy: dict) -> ControlMap:
-        rel = policy.get("control_map") or str(self._config_dir / "control_map.yaml")
-        path = Path(rel)
+        # ``control_map`` en policy.yaml es relativo a config_dir (nunca al cwd
+        # del proceso); una ruta absoluta (si alguna vez hiciera falta) se
+        # respeta tal cual.
+        rel = Path(policy.get("control_map") or "control_map.yaml")
+        path = rel if rel.is_absolute() else self._config_dir / rel
         if not path.is_file():
             raise GenerationServiceError(f"falta el mapa de CONTROL: {path}")
         return load_control_map(yaml.safe_load(path.read_text(encoding="utf-8")) or {})
+
+    def _semantic_contract(self, policy: dict) -> TemplateSemanticContract:
+        # Opcional (F02): si la política no declara contrato semántico, se
+        # genera sin esa capa adicional (sólo fingerprint estructural).
+        rel = policy.get("template_semantic_contract")
+        if not rel:
+            return TemplateSemanticContract(version="none")
+        path = Path(rel) if Path(rel).is_absolute() else self._config_dir / rel
+        if not path.is_file():
+            raise GenerationServiceError(f"falta el contrato semántico de plantilla: {path}")
+        return load_template_semantic_contract(
+            yaml.safe_load(path.read_text(encoding="utf-8")) or {},
+            base_dir=path.parent,
+        )
 
     def capability(self, *, probe_com: bool = True) -> ExcelCapability:
         return detect_excel_capability(probe_com=probe_com)
@@ -134,6 +157,7 @@ class GenerationService:
 
         policy = self._policy()
         control_map = self._control_map(policy)
+        semantic_contract = self._semantic_contract(policy)
         submission_label = (
             (policy.get("modes", {}).get(mode, {}) or {}).get("submission_label")
             or SUBMISSION_LABEL
@@ -217,6 +241,7 @@ class GenerationService:
             open_writer=open_writer,
             control_map=control_map,
             inspect=inspect,
+            semantic_contract=semantic_contract,
         )
         result.submission_label = submission_label
 

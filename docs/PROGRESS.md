@@ -272,6 +272,41 @@ alineación semántica con la plantilla oficial). Para el detalle por sprint ver
     diálogo sin perder el análisis. (3) warning `QFont setPointSize -1`: reglas
     QSS con `font-weight` sin `font-size` → añadido `font-size` explícito en 3
     reglas, sin cambio visual.
+- **3.11 — Windows packaging & local pilot: ✅ CODE COMPLETE (piloto Windows
+  pendiente de correr — sin Windows disponible en este entorno de desarrollo).**
+  Primer `.exe` piloto con PyInstaller **ONEDIR**. `app_paths.py` (nuevo):
+  `resource_root`/`find_config_dir`/`runtime_config_dir`/`excel_writer_config_dir`
+  resuelven `config/runtime_2026` y `config/excel_writer_2026` vía
+  `sys._MEIPASS` empaquetado o subiendo desde el módulo en desarrollo —
+  **nunca** desde el *cwd*; `user_data_dir`/`logs_dir`/`diagnostics_dir` bajo
+  `%LOCALAPPDATA%\REMASEP Automation\` (nunca junto al `.exe`, nunca dentro del
+  bundle). La UI inyecta esos paths al construir el `GenerationService` por
+  defecto (`ui/workers.py`) — el **CLI no cambia**. `logging_setup.py`:
+  `RotatingFileHandler` (1 MB × 2, sin PII) + guarda contra
+  `sys.stdout/stderr is None` en build `--windowed`; `run_app()` deja evidencia
+  técnica en el log y un aviso humano ante un fallo inesperado, nunca consola.
+  `--smoke-mode` (`remasep.main`) verifica arranque sin abrir ventana ni tocar
+  Excel COM. **Dos bugs reales sólo visibles al ejecutar** (no por lectura de
+  código): `control_map` de `policy.yaml` traía un path relativo *hardcoded*
+  resuelto contra el *cwd* (corregido: relativo a `config_dir`); `resource_root()`
+  chocaba con un subpaquete Python no relacionado también llamado `config/`
+  (corregido: exige los dos árboles reales `runtime_2026`+`excel_writer_2026`).
+  `packaging/remasep.spec` (windowed) + `remasep_debug.spec` (consola, mismo
+  contenido vía `_spec_common.py`) — sólo `config/runtime_2026`+
+  `config/excel_writer_2026` empaquetados, nada de `data/local`/`artifacts/`
+  dev/`outputs/`/workbook legacy; sin QtWebEngine (la app sólo usa
+  QtCore/QtGui/QtWidgets); hidden imports de pywin32 con evidencia (imports
+  perezosos que el análisis estático no ve). `scripts/build_windows.ps1`
+  (build reproducible, sin admin, nunca taskkill/toca Excel, sólo limpia
+  `dist/`/`build/` propios) + `scripts/build_smoke_test.py` (verifica
+  estructuralmente el dist construido). Suite completa (`tests/test_app_paths.py`,
+  `test_runtime_assets.py`, `test_generation_service_packaging.py`,
+  `test_logging_setup.py`, `test_build_smoke_test.py`) simula `sys._MEIPASS` /
+  *cwd* distinto / rutas con espacios y Unicode — sin depender de un build
+  real. **Pendiente en Windows**: correr el build, `build_smoke_test.py`,
+  y la prueba manual completa desde una carpeta copiada fuera del repo (ver
+  [`docs/WINDOWS_PACKAGING.md`](WINDOWS_PACKAGING.md)). Ver también
+  [`docs/WINDOWS_PILOT.md`](WINDOWS_PILOT.md) (guía no técnica).
 - **3.7+ — dimensiones de actividad / especialidad** y traducción a la tabla
   larga semántica: **pendiente**.
 - **Modelo de *provenance* / `source`**: `MEDINET` se aplica en 3.1–3.3; el delta
