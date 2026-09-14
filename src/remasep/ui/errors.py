@@ -200,3 +200,74 @@ def humanize_error(exc: BaseException, *, fallback: HumanError | None = None) ->
         _ACTION_BACK,
     )
     return HumanError(base.title, base.detail, base.action_label, technical)
+
+
+# ---------------------------------------------------------------------------
+# F08 — presentación explícita de CONTROL y de warnings específicas.
+#
+# Un borrador GENERATED_DRAFT puede convivir con CONTROL fallido o no
+# disponible (el MVP sólo-Medinet admite fuentes pendientes): eso NO es un
+# error de generación, pero tampoco debe ocultarse ni presentarse como
+# "completamente validado". badge_kind: "ok" | "warn".
+# ---------------------------------------------------------------------------
+
+_CONTROL_STATUS_MESSAGES: dict[str, tuple[str, str]] = {
+    _xw.CONTROL_PASS: (
+        "ok",
+        "CONTROL: sin errores registrados en la hoja CONTROL.",
+    ),
+    _xw.CONTROL_FAIL: (
+        "warn",
+        "CONTROL: la hoja CONTROL registra errores pendientes de revisión.",
+    ),
+    _xw.CONTROL_UNAVAILABLE: (
+        "warn",
+        "CONTROL: no se pudo leer el estado de la hoja CONTROL en este archivo.",
+    ),
+}
+_CONTROL_STATUS_FALLBACK = ("warn", "CONTROL: estado desconocido; revisa la hoja CONTROL a mano.")
+
+
+def describe_control_status(control_status: str) -> tuple[str, str]:
+    """``(badge_kind, texto_humano)`` para el estado de CONTROL de un borrador."""
+    return _CONTROL_STATUS_MESSAGES.get(control_status, _CONTROL_STATUS_FALLBACK)
+
+
+# Fragmentos conocidos dentro de un código de warning técnico -> texto humano.
+_WARNING_FRAGMENTS: tuple[tuple[str, str], ...] = (
+    (
+        "CLEANUP_PENDING",
+        (
+            "Quedó un archivo temporal sin poder borrarse (el informe final sí "
+            "se generó correctamente). Se puede eliminar a mano más tarde."
+        ),
+    ),
+    (
+        "RESERVATION_CLEANUP_PENDING",
+        "Quedó una reserva interna sin poder retirarse. No afecta al informe generado.",
+    ),
+    (
+        "TEMPLATE_SHA256_CHANGED",
+        (
+            "La plantilla cambió de forma binaria durante la generación (por "
+            "ejemplo, un re-guardado de Excel). El contenido verificado sigue "
+            "siendo correcto."
+        ),
+    ),
+    (
+        "TARGET_FORMULA_CONFLICT",
+        "Excel modificó una celda que debía recibir un dato durante el guardado.",
+    ),
+)
+
+
+def humanize_generation_warning(code: str) -> str:
+    """Traduce un código de warning técnico a una frase comprensible.
+
+    Nunca expone el código crudo al usuario; si no se reconoce el fragmento,
+    devuelve un texto genérico (no técnico) en vez del código tal cual.
+    """
+    for fragment, text in _WARNING_FRAGMENTS:
+        if fragment in code:
+            return text
+    return "Hay una observación adicional sobre esta generación (detalle técnico registrado en el log)."

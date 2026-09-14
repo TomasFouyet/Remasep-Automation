@@ -412,6 +412,98 @@ def test_generate_backend_error_shows_human_message(window, medinet_file, templa
 
 
 # ---------------------------------------------------------------------------
+# F08 — la pantalla de resultado debe distinguir CONTROL PASS/FAIL/UNAVAILABLE
+# y mostrar advertencias específicas (nunca "generado correctamente" a secas
+# para un estado que no está completamente validado).
+# ---------------------------------------------------------------------------
+
+
+def _outcome(*, control_status, warnings=(), ok=True, status="GENERATED_DRAFT"):
+    return GenerationOutcome(
+        ok=ok, status=status, submission_label="NOT_FOR_SUBMISSION",
+        output_path="outputs/REMASEP_2026_07_DRAFT.xlsm", written_cells=1122,
+        considered_records=24, integrity_ok=True, control_status=control_status,
+        warnings=warnings,
+    )
+
+
+def test_control_pass_is_shown_explicitly(window):
+    gen = window.screens["generate"]
+    gen._on_done(_outcome(control_status="PASS_INTERNAL_VALIDATION"))
+    txt = _all_label_text(gen)
+    assert "CONTROL" in txt
+    assert "sin errores" in txt.lower()
+
+
+def test_control_fail_is_shown_explicitly(window):
+    gen = window.screens["generate"]
+    gen._on_done(_outcome(control_status="FAIL_INTERNAL_VALIDATION"))
+    txt = _all_label_text(gen)
+    assert "CONTROL" in txt
+    assert "error" in txt.lower()
+    # nunca se debe afirmar que el resultado está completamente validado
+    assert "completamente validado" not in txt.lower()
+
+
+def test_control_unavailable_is_shown_explicitly(window):
+    gen = window.screens["generate"]
+    gen._on_done(_outcome(control_status="CONTROL_UNAVAILABLE"))
+    txt = _all_label_text(gen)
+    assert "CONTROL" in txt
+    assert "no se pudo" in txt.lower() or "no disponible" in txt.lower()
+
+
+def test_specific_warning_is_shown(window):
+    gen = window.screens["generate"]
+    gen._on_done(
+        _outcome(
+            control_status="PASS_INTERNAL_VALIDATION",
+            warnings=("TEMPLATE_SHA256_CHANGED",),
+        )
+    )
+    txt = _all_label_text(gen)
+    assert "plantilla" in txt.lower()  # texto humano, no el código técnico crudo
+    assert "TEMPLATE_SHA256_CHANGED" not in txt
+
+
+def test_cleanup_pending_warning_is_shown(window):
+    gen = window.screens["generate"]
+    gen._on_done(
+        _outcome(
+            control_status="PASS_INTERNAL_VALIDATION",
+            warnings=(
+                (
+                    "CLEANUP_PENDING: no se pudo borrar el workspace temporal "
+                    "/tmp/x (la salida final sí se generó)."
+                ),
+            ),
+        )
+    )
+    txt = _all_label_text(gen)
+    assert "temporal" in txt.lower()
+
+
+def test_failed_generation_is_never_shown_as_success(window):
+    gen = window.screens["generate"]
+    window.stack.setCurrentWidget(gen)
+    gen._on_done(
+        _outcome(
+            control_status="", ok=False, status="GENERATION_FAILED_INTEGRITY_CHECK",
+        )
+    )
+    assert not gen._result_card.isVisible()
+    assert gen._error.isVisible()
+
+
+def test_pending_sources_notice_survives_alongside_control_status(window):
+    gen = window.screens["generate"]
+    gen._on_done(_outcome(control_status="FAIL_INTERNAL_VALIDATION"))
+    txt = _all_label_text(gen)
+    assert "requerir información adicional" in txt  # aviso NOT_FOR_SUBMISSION
+    assert "CONTROL" in txt  # y el estado específico de CONTROL, ambos presentes
+
+
+# ---------------------------------------------------------------------------
 # "Guardar como" antes de generar (Problema 2)
 # ---------------------------------------------------------------------------
 

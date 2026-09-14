@@ -51,6 +51,66 @@ Excel **nunca**; sólo lo hace la implementación COM.
 `DisplayAlerts = False`. Nunca `taskkill` / matar `Excel.exe` / tocar procesos
 del usuario.
 
+### Política de macros/eventos (F02 auditoría 2026-09-14 / F06)
+
+`DispatchEx` **no** fija `AutomationSecurity` ni `EnableEvents` por sí solo:
+por defecto Office usa `msoAutomationSecurityLow` (**todas** las macros
+corren sin aviso cuando el archivo se abre por Automation — más permisivo
+que abrir el mismo archivo a mano). `ExcelSession.__enter__` fija, sólo en
+**esa** instancia `DispatchEx` (nunca Trust Center ni configuración global
+del usuario):
+
+- `Application.AutomationSecurity = msoAutomationSecurityForceDisable` (3) —
+  ninguna macro corre, sin prompts.
+- `Application.EnableEvents = False` — ningún evento (`Workbook_Open`,
+  `Worksheet_Change`, …) se dispara.
+
+Los valores previos se guardan y se restauran en `_teardown()` antes de
+`Quit()` (higiene defensiva; la instancia se destruye de todas formas).
+`write_value2` sigue rechazando escribir sobre una celda con fórmula
+(`TARGET_FORMULA_CONFLICT`) y `recalculate()` usa el motor de cálculo nativo
+de Excel — ninguno de los dos depende de que una macro se ejecute.
+
+Justificación (no se asumió sin revisar): se inspeccionó el VBA de la
+plantilla oficial (`REMASEP 2026_V1.4.xlsm`, Sprint C) y **no** contiene
+`Workbook_Open`, `Auto_Open`, `Worksheet_Change` ni ninguna `Function`
+(UDF) invocable desde una fórmula de celda. El único código son tres
+`Sub` disparadas por botones en la hoja "MACROS" (`PROTEGER` /
+`DESPROTEGER` / `RESPALDAARCHIVO`, esta última **destructiva**: convierte
+fórmulas en valores) — nunca se ejecutan automáticamente al abrir/escribir,
+con o sin esta política. Si una plantilla futura llegara a depender de una
+UDF para calcular, `calculate_full()` fallaría o produciría `#NAME?` de forma
+visible (lo detectaría `compare_formula_integrity`/`verify_targets`), nunca
+de forma silenciosa.
+
+Test unitario (`tests/test_excel_com_session.py`, sin Excel real, `win32com`
+inyectado): confirma que `__enter__` fija ambos valores y que `__exit__` los
+restaura.
+
+Test Windows opt-in (`tests/test_excel_com_integration.py::
+test_workbook_open_macro_does_not_fire_through_our_adapter`, `pytest -m
+excel`): usa un fixture **pre-construido y comiteado**
+(`tests/fixtures/synthetic_workbook_open.xlsm`, benigno, sin PII — un
+`Workbook_Open` que sólo escribe una marca en una celda), no lo genera en
+cada corrida. Dos partes, sobre copias independientes del fixture:
+
+- **(A) control** — abre la copia SIN nuestra política (Automation por
+  defecto). Si la marca tampoco aparece aquí, el resultado se reporta como
+  **inconcluyente** (otra capa de esa máquina ya bloquea el evento por su
+  cuenta) — nunca se interpreta como que la política F06 funcionó.
+- **(B) vía `ExcelSession`/`open_excel_com_writer`** — la marca debe estar
+  ausente.
+
+`scripts/build_workbook_open_fixture.py` genera el fixture **una sola vez**,
+offline, en una máquina Windows con Excel. Requiere temporalmente "Trust
+access to the VBA project object model" (Trust Center) **sólo para ese
+script** — el propio test, en cada corrida normal, no necesita esa opción
+(usa el archivo ya generado), y REMASEP en producción nunca la necesita ni
+la toca. **NEEDS_WINDOWS_VALIDATION** — no hay Windows/Excel en el entorno de
+desarrollo de este sprint; ni el fixture ni el resultado del test existen
+todavía. Pendiente: generar el fixture una vez y correr el test en una
+máquina Windows con Excel real.
+
 **Cierre determinista** (patch de cierre 3.7B). El desmontaje sigue este orden
 exacto para no dejar proxies COM que el GC de Python liberaría (`Release()`)
 *después* de desmontar el apartment — la causa de los `RPC_E_DISCONNECTED`

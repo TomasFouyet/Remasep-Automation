@@ -35,6 +35,17 @@ _XL_CALC_AUTOMATIC = -4105
 _XL_CALC_STATE_DONE = 0  # xlDone
 _XL_OPENXML_MACRO_ENABLED = 52
 
+# F06 — Application.AutomationSecurity (msoAutomationSecurity, MSDN):
+#   1 = msoAutomationSecurityLow           (DEFAULT: todas las macros corren
+#       sin aviso cuando el archivo se abre por Automation — el riesgo que
+#       auditó F06, no el diseño de REMASEP)
+#   2 = msoAutomationSecurityByUI          (usa lo configurado en Trust Center)
+#   3 = msoAutomationSecurityForceDisable  (ninguna macro corre, sin prompts)
+# REMASEP abre siempre una COPIA de trabajo por automatización, nunca de forma
+# interactiva: no hay UI para que un usuario apruebe nada, así que "ByUI" no
+# aporta nada — se fuerza ForceDisable en la instancia propia.
+_MSO_AUTOMATION_SECURITY_FORCE_DISABLE = 3
+
 # Espera de recálculo.
 RECALC_TIMEOUT_SECONDS = 120.0
 RECALC_POLL_SECONDS = 0.1
@@ -51,6 +62,8 @@ class ExcelSession(AbstractContextManager):
         self.visible = visible
         self.excel = None
         self._co_initialized = False
+        self._prev_automation_security: int | None = None
+        self._prev_enable_events: bool | None = None
 
     def __enter__(self):
         if platform.system() != "Windows":
@@ -65,6 +78,15 @@ class ExcelSession(AbstractContextManager):
             self.excel = win32com.client.DispatchEx("Excel.Application")
             self.excel.Visible = self.visible
             self.excel.DisplayAlerts = False
+            # F06 — política conservadora de macros/eventos, sólo en ESTA
+            # instancia DispatchEx (nunca Trust Center ni configuración
+            # global): ninguna macro corre (Workbook_Open, botones, etc.) y
+            # ningún evento se dispara al abrir/escribir la copia de trabajo.
+            # Se guarda el valor previo para restaurarlo al salir.
+            self._prev_automation_security = self.excel.AutomationSecurity
+            self._prev_enable_events = self.excel.EnableEvents
+            self.excel.AutomationSecurity = _MSO_AUTOMATION_SECURITY_FORCE_DISABLE
+            self.excel.EnableEvents = False
         except BaseException:
             self._teardown()
             raise
@@ -115,6 +137,17 @@ class ExcelSession(AbstractContextManager):
         excel = self.excel
         self.excel = None
         if excel is not None:
+            # Restaurar los valores previos de la instancia antes de cerrarla
+            # (higiene defensiva; esta instancia se destruye con Quit() de
+            # todas formas, pero nunca debe dejarse en un estado alterado).
+            if self._prev_automation_security is not None:
+                with contextlib.suppress(Exception):
+                    excel.AutomationSecurity = self._prev_automation_security
+            if self._prev_enable_events is not None:
+                with contextlib.suppress(Exception):
+                    excel.EnableEvents = self._prev_enable_events
+            self._prev_automation_security = None
+            self._prev_enable_events = None
             # Quit defensivo: Excel puede haber muerto ya.
             with contextlib.suppress(Exception):
                 excel.DisplayAlerts = False

@@ -33,6 +33,10 @@ REQUIRED_RELATIVE_PATHS = (
     "_internal/config/runtime_2026/metric_catalog.csv",
     "_internal/config/excel_writer_2026/policy.yaml",
     "_internal/config/excel_writer_2026/control_map.yaml",
+    # F02: el contrato semántico de plantilla también debe quedar en el bundle
+    # (si faltara, GenerationService fallaría recién al generar, no aquí).
+    "_internal/config/excel_writer_2026/template_semantic_contract.yaml",
+    "_internal/config/excel_writer_2026/template_static_formulas.csv",
     # F03: las reglas legacy productivas también deben quedar en el bundle.
     "_internal/config/legacy_current_logic_2026/rules.yaml",
 )

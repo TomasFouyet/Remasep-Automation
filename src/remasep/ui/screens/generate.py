@@ -21,7 +21,7 @@ from PySide6.QtWidgets import (
 
 from remasep.ui.components.step_indicator import StepIndicator
 from remasep.ui.components.widgets import Card, ErrorBanner, StatusBadge
-from remasep.ui.errors import HumanError
+from remasep.ui.errors import HumanError, describe_control_status, humanize_generation_warning
 from remasep.ui.open_location import open_containing_folder, open_path
 from remasep.ui.operation_lifecycle import (
     OperationKind,
@@ -250,6 +250,7 @@ class GenerateScreen(QWidget):
             if item.widget():
                 item.widget().deleteLater()
         name = Path(o.output_path).name if o.output_path else "—"
+        _, control_text = describe_control_status(o.control_status)
         rows = [
             ("Nombre del archivo", name),
             ("Período", (period or self._app.state.period).label),
@@ -260,6 +261,14 @@ class GenerateScreen(QWidget):
             line = QLabel(f"{label}:  {value}")
             line.setProperty("role", "muted")
             self._result_lines.addWidget(line)
+        control_line = QLabel(control_text)
+        control_line.setWordWrap(True)
+        self._result_lines.addWidget(control_line)
+        for code in o.warnings:
+            warn_line = QLabel("⚠ " + humanize_generation_warning(code))
+            warn_line.setProperty("role", "muted")
+            warn_line.setWordWrap(True)
+            self._result_lines.addWidget(warn_line)
         self._open_excel.setEnabled(bool(o.output_path))
         self._open_folder.setEnabled(bool(o.output_path))
         self._result_card.setVisible(True)

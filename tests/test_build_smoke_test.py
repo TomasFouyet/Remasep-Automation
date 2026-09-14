@@ -27,6 +27,12 @@ def _make_good_dist(tmp_path):
     writer.mkdir(parents=True)
     (writer / "policy.yaml").write_text("version: fake\n", encoding="utf-8")
     (writer / "control_map.yaml").write_text("sheet: CONTROL\n", encoding="utf-8")
+    (writer / "template_semantic_contract.yaml").write_text(
+        "version: fake\ncritical_formulas: []\n", encoding="utf-8"
+    )
+    (writer / "template_static_formulas.csv").write_text(
+        "sheet,cell,formula\n", encoding="utf-8"
+    )
 
     legacy = internal / "config" / "legacy_current_logic_2026"
     legacy.mkdir(parents=True)

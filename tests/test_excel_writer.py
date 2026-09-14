@@ -255,6 +255,131 @@ def test_formula_expression_change_fails_integrity(tmp_path):
     assert result.formula_integrity.ok is False
 
 
+# ---------------------------------------------------------------------------
+# F07 — la comparación de integridad no debe aceptar cambios semánticos reales
+# ---------------------------------------------------------------------------
+
+
+def test_norm_formula_distinguishes_literal_with_internal_space():
+    a = w._norm_formula('=IF(A1="A B",1,0)')
+    b = w._norm_formula('=IF(A1="AB",1,0)')
+    assert a != b
+
+
+def test_norm_formula_distinguishes_literal_case():
+    a = w._norm_formula('=EXACT("a","a")')
+    b = w._norm_formula('=EXACT("a","A")')
+    assert a != b
+
+
+def test_norm_formula_still_accepts_legitimate_resave_variants():
+    """Sólo se acepta como cosmética una diferencia PROBADA como tal: case de
+    función/referencia fuera de comillas. El espacio nunca se toca (puede ser
+    el operador de intersección de Excel) — ver los casos adversariales de
+    abajo."""
+    a = w._norm_formula("=SUM(A1:B1)")
+    b = w._norm_formula("=sum(A1:B1)")
+    assert a == b
+
+
+# ---------------------------------------------------------------------------
+# F07 (revisión adversarial) — el normalizador no puede: (a) confundir dos
+# hojas distintas por borrar el espacio de un nombre entre comillas simples,
+# (b) romper el escape de un apóstrofo dentro de un nombre de hoja, (c)
+# tocar una ruta/nombre de referencia externa entre comillas, (d) borrar el
+# operador de intersección de Excel (un espacio FUERA de comillas). Ante la
+# duda sobre si un espacio es cosmético, se preserva: prioridad = falso
+# rechazo visible > falso negativo silencioso.
+# ---------------------------------------------------------------------------
+
+
+def test_norm_formula_distinguishes_quoted_sheet_names_differing_only_by_space():
+    a = w._norm_formula("='Sheet 1'!A1")
+    b = w._norm_formula("='Sheet1'!A1")
+    assert a != b
+
+
+def test_norm_formula_treats_quoted_sheet_name_case_as_cosmetic():
+    """Los nombres de hoja SÍ son case-insensitive por especificación de
+    Excel (no puede haber 'Hoja1' y 'HOJA1' a la vez en el mismo libro) —
+    a diferencia del espacio, esto es una equivalencia demostrable."""
+    a = w._norm_formula("=+'REMASEP 01'!B307")
+    b = w._norm_formula("=+'remasep 01'!B307")
+    assert a == b
+
+
+def test_norm_formula_preserves_escaped_apostrophe_in_quoted_sheet_name():
+    text = "='O''Brien Data'!A1"
+    normalized = w._norm_formula(text)
+    assert "o''brien data" in normalized
+    # cambiar el nombre real (sin el apóstrofo) debe seguir detectándose
+    other = w._norm_formula("='OBrien Data'!A1")
+    assert normalized != other
+
+
+def test_norm_formula_preserves_external_reference_path_and_space():
+    text = r"='C:\My Folder\[Book.xlsx]Sheet 1'!A1"
+    normalized = w._norm_formula(text)
+    assert r"c:\my folder\[book.xlsx]sheet 1" in normalized
+    # una ruta distinta (otra carpeta) no puede normalizar igual
+    other = r"='C:\Other Folder\[Book.xlsx]Sheet 1'!A1"
+    assert normalized != w._norm_formula(other)
+
+
+def test_norm_formula_never_deletes_the_intersection_whitespace_operator():
+    """``=A1:A10 B5:D5`` es la intersección de dos rangos: el espacio ES el
+    operador. Borrarlo cambiaría el significado de la fórmula, no sólo su
+    representación."""
+    intersection = w._norm_formula("=A1:A10 B5:D5")
+    concatenated_by_mistake = w._norm_formula("=A1:A10B5:D5")  # referencia inválida/otra
+    assert intersection != concatenated_by_mistake
+    assert " " in intersection
+
+
+def test_formula_literal_change_inside_string_fails_integrity(tmp_path):
+    """Antes del fix, cambiar sólo el contenido de un literal ("A B" -> "AB")
+    era invisible para la comparación (F07-A): normalizaba dentro de comillas."""
+    targets = [("REMASEP_OD", "B10", 1)]
+    pending = _pw(targets)
+
+    def mutate(m: FakeWorkbookModel) -> None:
+        m.formula_map[("CONTROL", "E16")] = '=IF(D16="AB",E7+E8,0)'
+
+    model = _model(
+        targets,
+        formula_map={("CONTROL", "E16"): '=IF(D16="A B",E7+E8,0)'},
+        mutate_after_save=mutate,
+    )
+    result, _request, _ = _generate(tmp_path, pending, model)
+    assert result.status == w.STATUS_FAILED_INTEGRITY_CHECK
+    assert result.formula_integrity.ok is False
+    assert ("CONTROL", "E16") in result.formula_integrity.expression_changes
+
+
+def test_write_zero_missing_after_save_fails_target_verification(tmp_path):
+    """F07-B: un PendingWrite=0 cuya celda queda ausente tras guardar (no un 0
+    explícito) no puede reportarse como escritura correcta."""
+    targets = [("REMASEP_OD", "B10", 0)]
+    pending = _pw(targets)
+
+    def mutate(m: FakeWorkbookModel) -> None:
+        del m.values[("REMASEP_OD", "B10")]
+
+    model = _model(targets, mutate_after_save=mutate)
+    result, _request, _ = _generate(tmp_path, pending, model)
+    assert result.status == w.STATUS_FAILED_INTEGRITY_CHECK
+    assert result.target_verification.ok is False
+    assert result.target_verification.checks[0].status == "MISSING"
+
+
+def test_write_zero_present_after_save_passes_target_verification(tmp_path):
+    targets = [("REMASEP_OD", "B10", 0)]
+    pending = _pw(targets)
+    result, _, _ = _generate(tmp_path, pending, _model(targets))
+    assert result.target_verification.ok is True
+    assert result.target_verification.checks[0].status == "OK"
+
+
 def test_vba_lost_fails_integrity(tmp_path):
     targets = [("REMASEP_OD", "B10", 1)]
     pending = _pw(targets)

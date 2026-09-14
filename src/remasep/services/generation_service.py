@@ -30,10 +30,12 @@ from remasep.services.excel_writer import (
     ControlMap,
     GenerationRequest,
     GenerationResult,
+    TemplateSemanticContract,
     WorkbookSnapshot,
     WorkbookWriter,
     build_write_audit,
     load_control_map,
+    load_template_semantic_contract,
     plan_output_paths,
     snapshot_from_path,
 )
@@ -114,6 +116,20 @@ class GenerationService:
             raise GenerationServiceError(f"falta el mapa de CONTROL: {path}")
         return load_control_map(yaml.safe_load(path.read_text(encoding="utf-8")) or {})
 
+    def _semantic_contract(self, policy: dict) -> TemplateSemanticContract:
+        # Opcional (F02): si la política no declara contrato semántico, se
+        # genera sin esa capa adicional (sólo fingerprint estructural).
+        rel = policy.get("template_semantic_contract")
+        if not rel:
+            return TemplateSemanticContract(version="none")
+        path = Path(rel) if Path(rel).is_absolute() else self._config_dir / rel
+        if not path.is_file():
+            raise GenerationServiceError(f"falta el contrato semántico de plantilla: {path}")
+        return load_template_semantic_contract(
+            yaml.safe_load(path.read_text(encoding="utf-8")) or {},
+            base_dir=path.parent,
+        )
+
     def capability(self, *, probe_com: bool = True) -> ExcelCapability:
         return detect_excel_capability(probe_com=probe_com)
 
@@ -141,6 +157,7 @@ class GenerationService:
 
         policy = self._policy()
         control_map = self._control_map(policy)
+        semantic_contract = self._semantic_contract(policy)
         submission_label = (
             (policy.get("modes", {}).get(mode, {}) or {}).get("submission_label")
             or SUBMISSION_LABEL
@@ -224,6 +241,7 @@ class GenerationService:
             open_writer=open_writer,
             control_map=control_map,
             inspect=inspect,
+            semantic_contract=semantic_contract,
         )
         result.submission_label = submission_label
 
