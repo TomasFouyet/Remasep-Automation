@@ -82,21 +82,40 @@ registro, macro security, Trust Center ni Protected View.
 
 ```
 template
+  └─ O_CREAT|O_EXCL ─▶ .remasep-reservation-<hash>.lock  ← reserva por output
   └─copy2─▶ outputs/.remasep-tmp/<run_id>/working.xlsm   ← workspace propio y ÚNICO
               └─ write / recalc / save (Excel COM)
               └─ verificación (openpyxl, estático)
-                   └─ os.replace ──▶ outputs/REMASEP_2026_07_DRAFT.xlsm   (atómico)
+                   └─ os.link ──▶ outputs/REMASEP_2026_07_DRAFT.xlsm
+                                  (atómico y falla si ya existe)
                         └─ rmtree(workspace)  (best-effort)
+                        └─ release(reserva propia)
 ```
 
 Nunca se abre `template_path` en modo escritura ni se usa un temporal
 compartido: cada generación crea `outputs/.remasep-tmp/<run_id>/`
 (`run_id` = timestamp + `uuid4`, `mkdir(exist_ok=False)`) — dos corridas **jamás**
 comparten ruta y una corrida nunca pisa ni borra el temporal de otra. La
-promoción a la salida final es `Path.replace` (= `os.replace`, rename atómico)
-con **reintento acotado** (`_PROMOTE_ATTEMPTS = 5`, sin loop infinito) por si
-Windows conserva un handle momentáneo tras cerrar Excel; sólo ocurre si toda la
-verificación pasó.
+Antes de crear el workspace, cada proceso reserva el output mediante un lock
+lateral creado con `O_CREAT|O_EXCL`. El nombre contiene un hash de la ruta, no el
+nombre elegido por el usuario, y el contenido sólo incluye el `run_id` (sin PII).
+La publicación final usa `os.link`: crea atómicamente un segundo nombre para el
+archivo completo y **falla si el destino existe**, por lo que nunca reemplaza un
+archivo ajeno. Conserva reintento acotado (`_PROMOTE_ATTEMPTS = 5`, sin loop
+infinito) para handles transitorios. El workspace por defecto está en el mismo
+volumen que el output, requisito de los hard links.
+
+La reserva se libera en success y en todos los retornos manejados de generación
+(fallo antes/durante el writer, integridad o publicación). Ante crash duro puede
+quedar un lock huérfano. No se borra por antigüedad ni se intenta adivinar si está
+stale: hay que comprobar manualmente que no existe otra ejecución activa ni un
+output publicado y entonces eliminar sólo ese `.remasep-reservation-*.lock`.
+
+Garantía demostrada: filesystem local POSIX y diseño basado en primitivas
+disponibles en NTFS local. El comportamiento efectivo con carpetas sincronizadas
+por OneDrive y Excel COM se marca **NEEDS_WINDOWS_VALIDATION**; no se promete la
+misma semántica para proveedores remotos que no implementen fielmente exclusión y
+hard links.
 
 **Cleanup conservador** (`cleanup_run_workspace`): borra **sólo** su propio
 `<run_id>/` (salvaguarda `_is_within(root, .remasep-tmp)`; si no, `CLEANUP_REFUSED`).

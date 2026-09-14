@@ -15,11 +15,14 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+from PySide6.QtCore import QTimer
+from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import QApplication, QMainWindow, QMessageBox, QStackedWidget, QWidget
 
 from remasep.services.common import Period
 from remasep.services.medinet_summary import MonthlyMedinetSummary
 from remasep.ui.errors import HumanError
+from remasep.ui.operation_lifecycle import OperationKind, OperationManager
 from remasep.ui.screens.analysis import AnalysisScreen
 from remasep.ui.screens.dashboard import DashboardScreen
 from remasep.ui.screens.generate import GenerateScreen
@@ -64,6 +67,9 @@ class MainWindow(QMainWindow):
 
         month, year = _default_period()
         self.state = AppState(month=month, year=year)
+        self.operations = OperationManager(self)
+        self._close_pending = False
+        self.operations.all_operations_finished.connect(self._finish_deferred_close)
 
         self.stack = QStackedWidget()
         self.setCentralWidget(self.stack)
@@ -85,6 +91,13 @@ class MainWindow(QMainWindow):
     # --- navegación --------------------------------------------------
 
     def navigate(self, name: str) -> None:
+        current = self.stack.currentWidget()
+        current_name = getattr(current, "name", None)
+        if current_name != name:
+            if current_name == "analysis":
+                self.operations.cancel_current(OperationKind.ANALYSIS)
+            elif current_name == "generate":
+                self.operations.cancel_current(OperationKind.GENERATION)
         screen = self.screens[name]
         self.stack.setCurrentWidget(screen)
         on_enter = getattr(screen, "on_enter", None)
@@ -107,6 +120,32 @@ class MainWindow(QMainWindow):
             if selector is not None:
                 selector.clear()
         self.navigate("home")
+
+    # --- cierre seguro ----------------------------------------------
+
+    def closeEvent(self, event: QCloseEvent) -> None:
+        if self.operations.has_running_operations:
+            if not self._close_pending:
+                self._close_pending = True
+                self.operations.cancel_all()
+            # El backend puede estar dentro de Excel COM y no es seguro matarlo.
+            # Ocultar mantiene la UI responsiva mientras el manager conserva la
+            # propiedad de cada QThread hasta que termine por sí solo.
+            self.hide()
+            event.ignore()
+            return
+        self._close_pending = False
+        super().closeEvent(event)
+
+    def _finish_deferred_close(self) -> None:
+        if self._close_pending:
+            QTimer.singleShot(0, self._close_after_operations)
+
+    def _close_after_operations(self) -> None:
+        self.close()
+        app = QApplication.instance()
+        if app is not None:
+            app.quit()
 
 
 def run_app() -> None:  # pragma: no cover - punto de entrada

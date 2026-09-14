@@ -28,6 +28,28 @@ Navegación: `MainWindow` + `QStackedWidget`; cada pantalla expone `.name` y
 `template_path`, `output_path`) / `summary` / `analysis_error` / `generation`.
 `reset_flow()` vuelve al inicio conservando el período y limpiando los selectores.
 
+### Lifecycle de operaciones en background
+
+`MainWindow.operations` es el dueño único de todos los pares worker/`QThread`
+hasta recibir `QThread.finished`; una pantalla nunca destruye ni abandona el
+thread. Cada inicio captura un `OperationSnapshot` inmutable (`run_id`, tipo,
+período y rutas de input/template/output). Todas las señales llevan `run_id` y
+sólo se entregan si esa operación sigue autorizada y vigente.
+
+Cancelar, volver atrás o cambiar de período significa **revocar autorización**:
+el resultado/progreso/error tardío ya no puede mutar `AppState` ni UI, pero el
+backend termina de forma segura. Un análisis cancelado puede ser reemplazado por
+otro; una generación mantiene exclusividad hasta que su thread realmente acaba,
+incluso si fue cancelada. La guarda lógica rechaza una segunda generación y el
+botón del resumen queda deshabilitado mientras exista una.
+
+Al cerrar sin operaciones la ventana termina normalmente. Si hay un backend
+activo, el cierre se difiere sin bloquear el event loop: se oculta la ventana,
+se revocan resultados y el manager conserva los objetos hasta el fin natural;
+recién entonces cierra la aplicación. No se usa `terminate`, no se mata Excel ni
+se fuerza el thread. Cerrar mientras Excel COM está guardando necesita
+**NEEDS_WINDOWS_VALIDATION** para confirmar la experiencia y tiempos reales.
+
 ### Detección asistida del período (`detect_medinet_periods`)
 
 `src/remasep/services/medinet_analysis.py::detect_medinet_periods(path)` devuelve
@@ -58,7 +80,8 @@ Al pulsar **Generar REMASEP**, `GenerateScreen.on_enter()` abre
   pedir (`DontConfirmOverwrite`). Si aun así el writer devuelve
   `OUTPUT_ALREADY_EXISTS`, el botón **"Elegir otro nombre"** reabre "Guardar como"
   conservando Medinet / plantilla / período / análisis. No se borran archivos
-  previos. La protección de no-overwrite del writer **no se modificó**.
+  previos. El writer además reserva el nombre entre procesos y publica con
+  semántica create-if-absent, sin reemplazar el destino.
 - Una segunda generación del mismo mes vuelve a pedir "Guardar como" (la ruta
   anterior ya existe), así `OUTPUT_ALREADY_EXISTS` no aparece como pantalla
   terminal en un flujo normal.

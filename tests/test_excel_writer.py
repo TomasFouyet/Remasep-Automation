@@ -100,6 +100,7 @@ def test_happy_path_writes_all_targets_and_promotes_atomically(tmp_path):
     assert result.cleanup_status == w.CLEANUP_OK
     assert result.workspace_path is None
     assert not (tmp_path / ".remasep-tmp").exists()  # workspace borrado
+    assert not w._reservation_path(request.output_path).exists()
     assert result.template_unchanged is True
     assert result.submission_label == w.SUBMISSION_LABEL
 
@@ -227,6 +228,7 @@ def test_target_with_formula_aborts_and_keeps_template(tmp_path):
     assert result.template_unchanged is True
     assert result.cleanup_status == w.CLEANUP_OK
     assert not (tmp_path / ".remasep-tmp").exists()
+    assert not w._reservation_path(request.output_path).exists()
 
 
 def test_target_not_writable_aborts(tmp_path):
@@ -494,18 +496,57 @@ def test_cleanup_refuses_to_delete_outside_its_workspace(tmp_path):
     assert outside.exists()  # no se borró nada ajeno
 
 
+def test_reservation_is_released_when_workspace_creation_fails(tmp_path, monkeypatch):
+    targets = [("REMASEP_OD", "B10", 1)]
+    pending = _pw(targets)
+    request = _request(tmp_path, pending)
+    harness = FakeWriterHarness(_model(targets))
+
+    def fail_workspace(*_args, **_kwargs):
+        raise OSError("workspace unavailable")
+
+    monkeypatch.setattr(w, "create_run_workspace", fail_workspace)
+    result = w.generate(
+        request,
+        pending,
+        open_writer=harness.open_writer,
+        control_map=_CONTROL_MAP,
+        inspect=harness.inspect,
+    )
+
+    assert result.status == w.STATUS_GENERATION_FAILED
+    assert not w._reservation_path(request.output_path).exists()
+
+
+def test_reservation_is_released_when_writer_raises(tmp_path):
+    targets = [("REMASEP_OD", "B10", 1)]
+    pending = _pw(targets)
+    request = _request(tmp_path, pending)
+    harness = FakeWriterHarness(_model(targets), fail_during_write=True)
+
+    result = w.generate(
+        request,
+        pending,
+        open_writer=harness.open_writer,
+        control_map=_CONTROL_MAP,
+        inspect=harness.inspect,
+    )
+
+    assert result.status == w.STATUS_GENERATION_FAILED
+    assert not w._reservation_path(request.output_path).exists()
+
+
 def test_atomic_promote_retries_then_raises(monkeypatch):
     calls = {"n": 0}
 
-    class _P:
-        def replace(self, _dst):
-            calls["n"] += 1
-            raise PermissionError("bloqueado")
-        name = "x.xlsm"
+    def blocked_link(_src, _dst):
+        calls["n"] += 1
+        raise PermissionError("bloqueado")
 
     monkeypatch.setattr(w, "_sleep", lambda _s: None)
+    monkeypatch.setattr(w.os, "link", blocked_link)
     with pytest.raises(w.ExcelWriterError):
-        w._atomic_promote(_P(), Path("x.xlsm"))
+        w._atomic_promote(Path("working.xlsm"), Path("x.xlsm"))
     assert calls["n"] == w._PROMOTE_ATTEMPTS  # acotado, sin loop infinito
 
 
@@ -513,17 +554,17 @@ def test_atomic_promote_succeeds_after_transient_lock(tmp_path, monkeypatch):
     src = tmp_path / "src.xlsm"
     src.write_bytes(b"data")
     dst = tmp_path / "dst.xlsm"
-    real_replace = Path.replace
+    real_link = w.os.link
     state = {"fails": 2}
 
-    def flaky(self, target):
+    def flaky(source, target):
         if state["fails"] > 0:
             state["fails"] -= 1
             raise PermissionError("transient")
-        return real_replace(self, target)
+        return real_link(source, target)
 
     monkeypatch.setattr(w, "_sleep", lambda _s: None)
-    monkeypatch.setattr(Path, "replace", flaky)
+    monkeypatch.setattr(w.os, "link", flaky)
     w._atomic_promote(src, dst)
     assert dst.read_bytes() == b"data"
 

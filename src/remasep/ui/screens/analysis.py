@@ -6,7 +6,6 @@ mensaje humano con acción para elegir otro archivo.
 
 from __future__ import annotations
 
-from PySide6.QtCore import QThread
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
@@ -19,6 +18,11 @@ from PySide6.QtWidgets import (
 from remasep.ui.components.step_indicator import StepIndicator
 from remasep.ui.components.widgets import Card, ErrorBanner
 from remasep.ui.errors import HumanError
+from remasep.ui.operation_lifecycle import (
+    OperationKind,
+    OperationSnapshot,
+    StartResult,
+)
 from remasep.ui.workers import ANALYSIS_STEPS, AnalysisWorker, compute_medinet_summary
 
 _STEPS = ["Datos", "Análisis", "Resumen", "Informe"]
@@ -30,8 +34,7 @@ class AnalysisScreen(QWidget):
     def __init__(self, app: QWidget) -> None:
         super().__init__()
         self._app = app
-        self._thread: QThread | None = None
-        self._worker: AnalysisWorker | None = None
+        self._run_id: str | None = None
 
         self.steps = StepIndicator(_STEPS)
         heading = QLabel("Analizando los datos de Medinet")
@@ -82,21 +85,32 @@ class AnalysisScreen(QWidget):
 
     def _start(self) -> None:
         state = self._app.state
-        self._thread = QThread(self)
-        self._worker = AnalysisWorker(state.medinet_path, state.period)
-        self._worker.moveToThread(self._thread)
-        self._thread.started.connect(self._worker.run)
-        self._worker.step.connect(self._on_step)
-        self._worker.done.connect(self._on_done)
-        self._worker.failed.connect(self._on_failed)
-        self._thread.start()
+        operation = OperationSnapshot.create(
+            operation_type=OperationKind.ANALYSIS,
+            period=state.period,
+            input_path=state.medinet_path,
+        )
+        started = self._app.operations.start(
+            operation,
+            AnalysisWorker,
+            on_step=lambda _op, text, index, total: self._on_step(text, index, total),
+            on_done=lambda _op, summary: self._on_done(summary),
+            on_failed=lambda _op, human: self._on_failed(human),
+        )
+        if started is StartResult.STARTED:
+            self._run_id = operation.run_id
+            return
+        self._progress_card.setVisible(False)
+        self._error.show_error(
+            "Ya hay un análisis en curso.",
+            "Espera a que termine antes de iniciar otro análisis.",
+            "Volver",
+        )
 
     def _teardown(self) -> None:
-        if self._thread is not None:
-            self._thread.quit()
-            self._thread.wait(2000)
-            self._thread = None
-            self._worker = None
+        if self._run_id is not None:
+            self._app.operations.cancel(self._run_id)
+            self._run_id = None
 
     def _cancel(self) -> None:
         self._teardown()

@@ -12,6 +12,7 @@ from datetime import date
 from pathlib import Path
 
 import pytest
+from PySide6.QtCore import QEventLoop, QTimer
 from PySide6.QtWidgets import QApplication
 
 from remasep.services.common import Period
@@ -64,6 +65,22 @@ def _drain() -> None:
     QApplication.instance().processEvents()
 
 
+def _wait_background(window) -> None:
+    """Espera por señal al backend cancelado para no filtrar QThreads entre tests."""
+    if not window.operations.has_running_operations:
+        return
+    loop = QEventLoop()
+    timed_out = []
+    timer = QTimer()
+    timer.setSingleShot(True)
+    timer.timeout.connect(lambda: (timed_out.append(True), loop.quit()))
+    window.operations.all_operations_finished.connect(loop.quit)
+    timer.start(5000)
+    loop.exec()
+    window.operations.all_operations_finished.disconnect(loop.quit)
+    assert not timed_out, "el backend de test no finalizó"
+
+
 def _fill_new_report(window, medinet, template, *, month=7, year=2026):
     nr = window.screens["new_report"]
     nr.month_combo.setCurrentIndex(month - 1)
@@ -77,7 +94,8 @@ def _fill_new_report(window, medinet, template, *, month=7, year=2026):
 def _run_analysis(window) -> None:
     """Lanza el análisis y lo resuelve de forma determinista."""
     window.screens["new_report"]._analyze()      # navega a 'analysis' + hilo
-    window.screens["analysis"]._teardown()        # detiene el hilo de fondo
+    window.screens["analysis"]._teardown()        # revoca el resultado del hilo
+    _wait_background(window)
     _drain()                                      # entrega su señal encolada
     window.screens["analysis"].run_now()          # ejecución síncrona (idempotente)
 
@@ -87,6 +105,7 @@ def _run_generate(window, out_path) -> None:
     window.state.output_path = Path(out_path)
     window.navigate("generate")                    # on_enter arranca el hilo
     window.screens["generate"]._teardown()
+    _wait_background(window)
     _drain()
     window.screens["generate"].run_now()
 
@@ -128,6 +147,7 @@ def test_step_indicator_advances_through_flow(window, medinet_file, template_fil
     assert window.screens["analysis"].steps.current == 1
 
     window.screens["analysis"]._teardown()
+    _wait_background(window)
     _drain()
     window.screens["analysis"].run_now()
     assert window.current_screen_name == "dashboard"
@@ -421,6 +441,7 @@ def test_generate_prompts_save_as_and_passes_chosen_path(
     window.state.output_path = None                 # fuerza el diálogo "Guardar como"
     window.navigate("generate")                     # on_enter -> getSaveFileName (mock) -> hilo
     window.screens["generate"]._teardown()
+    _wait_background(window)
     _drain()
     window.screens["generate"].run_now()
 
@@ -498,6 +519,7 @@ def test_output_exists_retry_reopens_save_as_not_new_report(
 
     gen._retry_or_back()                # botón "Elegir otro nombre"
     window.screens["generate"]._teardown()
+    _wait_background(window)
     _drain()
 
     assert reopened["n"] >= 1                       # reabrió "Guardar como"

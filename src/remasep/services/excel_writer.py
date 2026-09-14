@@ -13,6 +13,9 @@ REMASEP oficial.
 
 from __future__ import annotations
 
+import hashlib
+import json
+import os
 import shutil
 import time
 import uuid
@@ -85,6 +88,10 @@ FORMULA_EXPRESSION_CHANGE = "FORMULA_EXPRESSION_CHANGE"
 
 class ExcelWriterError(RemasepError):
     """Error del Excel writer con mensaje claro (sin traceback al usuario)."""
+
+
+class OutputAlreadyExistsError(ExcelWriterError):
+    """La publicación perdió la carrera porque el destino ya existe."""
 
 
 def describe_com_error(exc: BaseException) -> str:
@@ -162,8 +169,6 @@ def vba_payload_info(path: str | Path) -> tuple[bool, str | None]:
     with zipfile.ZipFile(p) as archive:
         if _VBA_ENTRY not in archive.namelist():
             return False, None
-        import hashlib
-
         return True, hashlib.sha256(archive.read(_VBA_ENTRY)).hexdigest()
 
 
@@ -639,6 +644,66 @@ class RunWorkspace:
     working_path: Path
 
 
+@dataclass(frozen=True)
+class OutputReservation:
+    """Reserva interproceso de un output, poseída por un ``run_id`` no sensible."""
+
+    output_path: Path
+    lock_path: Path
+    run_id: str
+    _payload: bytes = field(repr=False)
+
+    def release(self) -> bool:
+        """Borra sólo el lock cuyo contenido todavía acredita este ownership."""
+        try:
+            if self.lock_path.read_bytes() != self._payload:
+                return False
+            self.lock_path.unlink()
+        except (FileNotFoundError, PermissionError, OSError):
+            return False
+        return True
+
+
+def _reservation_path(output_path: Path) -> Path:
+    canonical = os.path.normcase(str(output_path.resolve())).encode("utf-8")
+    digest = hashlib.sha256(canonical).hexdigest()[:24]
+    return output_path.parent / f".remasep-reservation-{digest}.lock"
+
+
+def acquire_output_reservation(
+    output_path: str | Path, run_id: str
+) -> OutputReservation | None:
+    """Adquiere de forma atómica el derecho a publicar ``output_path``.
+
+    ``O_EXCL`` aporta exclusión entre procesos en filesystem local (incluido
+    NTFS). Un lock existente nunca se elimina por edad: requiere recuperación
+    manual después de comprobar que no queda una ejecución activa.
+    """
+    output = Path(output_path)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    lock_path = _reservation_path(output)
+    payload = json.dumps(
+        {"run_id": run_id}, sort_keys=True, separators=(",", ":")
+    ).encode("ascii")
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0)
+    try:
+        descriptor = os.open(lock_path, flags, 0o600)
+    except FileExistsError:
+        return None
+    try:
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.write(payload)
+            stream.flush()
+            os.fsync(stream.fileno())
+    except Exception:
+        try:
+            lock_path.unlink()
+        except OSError:
+            pass
+        raise
+    return OutputReservation(output, lock_path, run_id, payload)
+
+
 def new_run_id() -> str:
     return f"{datetime.now(UTC):%Y%m%dT%H%M%S}-{uuid.uuid4().hex[:12]}"
 
@@ -688,13 +753,20 @@ def cleanup_run_workspace(workspace: RunWorkspace) -> tuple[str, str | None]:
 
 
 def _atomic_promote(working_path: Path, final_path: Path) -> None:
-    """``os.replace`` (rename atómico) con reintento **acotado** ante un handle
-    residual de Excel en Windows. Sin loop infinito, sin borrado forzado."""
+    """Publica el archivo completo sin reemplazar jamás un destino existente.
+
+    El workspace está junto al output, por lo que ``os.link`` crea otro nombre
+    para el mismo archivo en forma atómica y con semántica create-if-absent en
+    NTFS y filesystems POSIX locales. El cleanup posterior elimina el nombre de
+    trabajo sin afectar el hard link final.
+    """
     last: OSError | None = None
     for attempt in range(_PROMOTE_ATTEMPTS):
         try:
-            working_path.replace(final_path)
+            os.link(working_path, final_path)
             return
+        except FileExistsError as exc:
+            raise OutputAlreadyExistsError("OUTPUT_ALREADY_EXISTS") from exc
         except (PermissionError, OSError) as exc:
             last = exc
             if attempt + 1 < _PROMOTE_ATTEMPTS:
@@ -823,10 +895,32 @@ def generate(
         ]
         return result
 
+    # --- reserva interproceso del derecho de publicación -----------
+    run_id = new_run_id()
+    result.run_id = run_id
+    reservation = acquire_output_reservation(request.output_path, run_id)
+    if reservation is None:
+        result.status = STATUS_OUTPUT_EXISTS
+        result.errors = ["OUTPUT_RESERVED"]
+        return result
+
+    def _release_reservation() -> None:
+        if not reservation.release():
+            result.warnings.append(
+                "RESERVATION_CLEANUP_PENDING: no se pudo retirar la reserva propia; "
+                "requiere verificación manual antes de eliminarla."
+            )
+
     # --- workspace temporal propio de ESTA corrida ------------------
-    request.output_path.parent.mkdir(parents=True, exist_ok=True)
-    workspace = create_run_workspace(request.output_path, tmp_base=request.tmp_base)
-    result.run_id = workspace.run_id
+    try:
+        workspace = create_run_workspace(
+            request.output_path, tmp_base=request.tmp_base, run_id=run_id
+        )
+    except Exception as exc:  # noqa: BLE001 - error manejable y reserva liberada
+        result.status = STATUS_GENERATION_FAILED
+        result.errors = [f"{exc.__class__.__name__}: {exc}"]
+        _release_reservation()
+        return result
     working_path = workspace.working_path
 
     def _finish_failure(status: str, errors: list[str]) -> GenerationResult:
@@ -844,6 +938,7 @@ def generate(
         result.template_unchanged = (
             result.template_sha256_after == result.template_sha256_before
         )
+        _release_reservation()
         return result
 
     # --- copy-first + escritura --------------------------------------
@@ -921,6 +1016,8 @@ def generate(
         return _finish_failure(STATUS_OUTPUT_EXISTS, ["OUTPUT_ALREADY_EXISTS"])
     try:
         _atomic_promote(working_path, request.output_path)
+    except OutputAlreadyExistsError:
+        return _finish_failure(STATUS_OUTPUT_EXISTS, ["OUTPUT_ALREADY_EXISTS"])
     except ExcelWriterError as exc:
         return _finish_failure(STATUS_GENERATION_FAILED, [str(exc)])
 
@@ -933,6 +1030,7 @@ def generate(
             f"CLEANUP_PENDING: no se pudo borrar el workspace temporal {diag} "
             "(la salida final sí se generó). Se puede eliminar manualmente."
         )
+    _release_reservation()
 
     result.template_sha256_after = compute_sha256(request.template_path)
     result.template_unchanged = result.template_sha256_after == result.template_sha256_before
