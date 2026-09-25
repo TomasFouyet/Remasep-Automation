@@ -621,6 +621,134 @@ def test_cleanup_refuses_to_delete_outside_its_workspace(tmp_path):
     assert outside.exists()  # no se borró nada ajeno
 
 
+def _real_workspace(tmp_path: Path) -> w.RunWorkspace:
+    out = tmp_path / "outputs" / "R.xlsm"
+    ws = w.create_run_workspace(out, run_id="fixed")
+    (ws.root / "working.xlsm").write_bytes(b"content")
+    return ws
+
+
+def _winerror(cls, winerror: int, msg: str = "boom") -> OSError:
+    exc = cls(msg)
+    exc.winerror = winerror
+    return exc
+
+
+def test_cleanup_retries_transient_access_denied_then_succeeds(tmp_path, monkeypatch):
+    """WinError 5 (ERROR_ACCESS_DENIED) en los primeros N-1 intentos, éxito después."""
+    ws = _real_workspace(tmp_path)
+    real_rmtree = w.shutil.rmtree
+    calls = []
+    sleeps = []
+
+    def _flaky(path):
+        calls.append(path)
+        if len(calls) < 3:
+            raise _winerror(PermissionError, 5)
+        real_rmtree(path)
+
+    monkeypatch.setattr(w.shutil, "rmtree", _flaky)
+    monkeypatch.setattr(w, "_sleep", lambda s: sleeps.append(s))
+
+    status, diag = w.cleanup_run_workspace(ws)
+
+    assert status == w.CLEANUP_OK
+    assert diag is None
+    assert len(calls) == 3  # 2 fallos + 1 éxito, número exacto de llamadas
+    assert len(sleeps) == 2  # un sleep antes de cada retry, ninguno tras el éxito
+    assert not ws.root.exists()
+
+
+def test_cleanup_gives_up_after_bounded_retries_on_persistent_access_denied(
+    tmp_path, monkeypatch
+):
+    """WinError 5 en todos los intentos: CLEANUP_PENDING, número finito de llamadas."""
+    ws = _real_workspace(tmp_path)
+    calls = []
+    sleeps = []
+
+    def _always_denied(path):
+        calls.append(path)
+        raise _winerror(PermissionError, 5)
+
+    monkeypatch.setattr(w.shutil, "rmtree", _always_denied)
+    monkeypatch.setattr(w, "_sleep", lambda s: sleeps.append(s))
+
+    status, diag = w.cleanup_run_workspace(ws)
+
+    assert status == w.CLEANUP_PENDING
+    assert diag == str(ws.root)
+    assert len(calls) == 5  # máximo acotado, no infinito
+    assert len(sleeps) == 4  # no hay sleep después del último intento
+    assert ws.root.exists()  # nunca se fuerza el borrado
+
+
+def test_cleanup_retries_transient_sharing_violation_then_succeeds(tmp_path, monkeypatch):
+    """WinError 32 (ERROR_SHARING_VIOLATION) también se trata como transitorio."""
+    ws = _real_workspace(tmp_path)
+    real_rmtree = w.shutil.rmtree
+    calls = []
+
+    def _flaky(path):
+        calls.append(path)
+        if len(calls) < 2:
+            raise _winerror(PermissionError, 32)
+        real_rmtree(path)
+
+    monkeypatch.setattr(w.shutil, "rmtree", _flaky)
+    monkeypatch.setattr(w, "_sleep", lambda _s: None)
+
+    status, diag = w.cleanup_run_workspace(ws)
+
+    assert status == w.CLEANUP_OK
+    assert diag is None
+    assert len(calls) == 2
+
+
+def test_cleanup_does_not_retry_non_transient_errors(tmp_path, monkeypatch):
+    """Un OSError sin WinError transitorio conocido no debe gastar reintentos."""
+    ws = _real_workspace(tmp_path)
+    calls = []
+    sleeps = []
+
+    def _not_found_like(path):
+        calls.append(path)
+        raise _winerror(OSError, 3)  # ERROR_PATH_NOT_FOUND, no está en la lista transitoria
+
+    monkeypatch.setattr(w.shutil, "rmtree", _not_found_like)
+    monkeypatch.setattr(w, "_sleep", lambda s: sleeps.append(s))
+
+    status, diag = w.cleanup_run_workspace(ws)
+
+    assert status == w.CLEANUP_PENDING
+    assert diag == str(ws.root)
+    assert len(calls) == 1  # un solo intento: no era transitorio, no vale la pena reintentar
+    assert len(sleeps) == 0
+
+
+def test_cleanup_logs_winerror_and_errno_without_pii(tmp_path, monkeypatch, caplog):
+    """El logging estructurado debe incluir winerror/errno reales, sin datos clínicos."""
+    ws = _real_workspace(tmp_path)
+
+    def _always_denied(path):
+        raise _winerror(PermissionError, 5)
+
+    monkeypatch.setattr(w.shutil, "rmtree", _always_denied)
+    monkeypatch.setattr(w, "_sleep", lambda _s: None)
+
+    with caplog.at_level("WARNING", logger="remasep.excel_writer"):
+        status, _diag = w.cleanup_run_workspace(ws)
+
+    assert status == w.CLEANUP_PENDING
+    joined = "\n".join(record.getMessage() for record in caplog.records)
+    assert "winerror=5" in joined or "winerror': 5" in joined or "winerror=5," in joined
+    assert "PermissionError" in joined
+    assert "CLEANUP_PENDING" in joined
+    # No debe filtrar datos clínicos (nombre/RUT/fecha de nacimiento) al log.
+    for banned in ("rut", "paciente", "nombre_completo"):
+        assert banned not in joined.lower()
+
+
 def test_reservation_is_released_when_workspace_creation_fails(tmp_path, monkeypatch):
     targets = [("REMASEP_OD", "B10", 1)]
     pending = _pw(targets)
