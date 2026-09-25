@@ -17,6 +17,7 @@ import csv
 import hashlib
 import io
 import json
+import logging
 import os
 import shutil
 import time
@@ -58,6 +59,20 @@ CLEANUP_PENDING = "CLEANUP_PENDING"
 CLEANUP_REFUSED = "CLEANUP_REFUSED_OUT_OF_WORKSPACE"
 _PROMOTE_ATTEMPTS = 5
 _PROMOTE_DELAY_SECONDS = 0.3
+
+_logger = logging.getLogger("remasep.excel_writer")
+
+# WinError transitorios conocidos para el rmtree del workspace temporal:
+# 5  = ERROR_ACCESS_DENIED (reproducido: OneDrive retiene brevemente el
+#      directorio mientras lo indexa/convierte en placeholder tras un
+#      create+delete reciente — confirmado con repro sintético sin Excel/COM).
+# 32 = ERROR_SHARING_VIOLATION (otro proceso, p. ej. indexador/antivirus/
+#      OneDrive, tiene el path abierto un instante; ya anticipado en el
+#      docstring original de cleanup_run_workspace antes de este fix).
+# Cualquier otro OSError se considera no transitorio: un solo intento, sin
+# gastar reintentos.
+_CLEANUP_TRANSIENT_WINERRORS = frozenset({5, 32})
+_CLEANUP_RETRY_DELAYS_SECONDS = (0.25, 0.5, 1.0, 2.0)  # 4 esperas -> 5 intentos totales
 
 # --- modos / estados -----------------------------------------------------
 MODE_DIAGNOSTIC_REFERENCE = "DIAGNOSTIC_REFERENCE"
@@ -892,6 +907,16 @@ def create_run_workspace(
     )
 
 
+def _cleanup_dir_state(path: Path) -> str:
+    """Estado barato/seguro del directorio para el log de diagnóstico."""
+    try:
+        if not path.exists():
+            return "missing"
+        return "empty" if not any(path.iterdir()) else "non_empty"
+    except OSError:
+        return "unknown"
+
+
 def cleanup_run_workspace(workspace: RunWorkspace) -> tuple[str, str | None]:
     """Cleanup best-effort del workspace **propio**.
 
@@ -899,24 +924,52 @@ def cleanup_run_workspace(workspace: RunWorkspace) -> tuple[str, str | None]:
 
     - ``CLEANUP_OK`` — se borró.
     - ``CLEANUP_PENDING`` — Windows mantiene un handle (``PermissionError`` /
-      ``WinError 32``): **no** se fuerza, **no** ``taskkill``, **no** loop; se
-      devuelve la ruta sólo para diagnóstico local.
+      ``WinError 5``/``32``): se reintenta un número pequeño y acotado de
+      veces (ver ``_CLEANUP_RETRY_DELAYS_SECONDS``) sólo cuando el error es
+      uno de los WinErrors transitorios conocidos; si se agotan los
+      reintentos, o el error no es transitorio, **no** se fuerza el borrado,
+      **no** ``taskkill``, **no** loop infinito; se devuelve la ruta sólo
+      para diagnóstico local.
     - ``CLEANUP_REFUSED_OUT_OF_WORKSPACE`` — la ruta no está bajo ``tmp_base``
       (nunca debería ocurrir; salvaguarda para no borrar rutas ajenas).
     """
     if not _is_within(workspace.root, workspace.tmp_base):
         return CLEANUP_REFUSED, str(workspace.root)
-    try:
-        if workspace.root.exists():
-            shutil.rmtree(workspace.root)
-        # quitar el .remasep-tmp/ si quedó vacío (best-effort, no fatal)
+
+    max_attempts = len(_CLEANUP_RETRY_DELAYS_SECONDS) + 1
+    last_exc: OSError | None = None
+    for attempt in range(1, max_attempts + 1):
         try:
-            workspace.tmp_base.rmdir()
-        except OSError:
-            pass
-        return CLEANUP_OK, None
-    except (PermissionError, OSError):
-        return CLEANUP_PENDING, str(workspace.root)
+            if workspace.root.exists():
+                shutil.rmtree(workspace.root)
+            # quitar el .remasep-tmp/ si quedó vacío (best-effort, no fatal)
+            try:
+                workspace.tmp_base.rmdir()
+            except OSError:
+                pass
+            return CLEANUP_OK, None
+        except (PermissionError, OSError) as exc:
+            last_exc = exc
+            winerror = getattr(exc, "winerror", None)
+            transient = winerror in _CLEANUP_TRANSIENT_WINERRORS
+            _logger.warning(
+                "cleanup workspace intento %d/%d falló: type=%s errno=%s "
+                "winerror=%s transient=%s path=%s",
+                attempt, max_attempts, type(exc).__name__, exc.errno, winerror,
+                transient, workspace.root,
+            )
+            if not transient or attempt == max_attempts:
+                break
+            _sleep(_CLEANUP_RETRY_DELAYS_SECONDS[attempt - 1])
+
+    _logger.error(
+        "CLEANUP_PENDING: workspace=%s errno=%s winerror=%s dir_state=%s",
+        workspace.root,
+        getattr(last_exc, "errno", None),
+        getattr(last_exc, "winerror", None),
+        _cleanup_dir_state(workspace.root),
+    )
+    return CLEANUP_PENDING, str(workspace.root)
 
 
 def _atomic_promote(working_path: Path, final_path: Path) -> None:
