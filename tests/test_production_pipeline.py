@@ -172,6 +172,39 @@ def test_production_applies_confirmed_estado_filter(make_medinet, _forbid_legacy
     assert scope.processing_scope_records == 2
 
 
+def test_non_ambulatory_rows_are_excluded_before_structural_validation(make_medinet):
+    headers = ["TIPO DE AGENDA", "DIA CITA", "FECHA NACIMIENTO", "SEXO", "SUCURSAL",
+               "ESPECIALIDAD", "TIPO DE CITA", "PRESTACIÓN", "ESTADO", "MODALIDAD",
+               "PRESTACIÓN REALIZADA"]
+    ambulatory = ["Ambulatoria", *_row()]
+    surgical_pending = ["Pabellón QX", *_row(estado="Agendado")]
+    surgical_pending[6] = None  # TIPO DE CITA
+    surgical_attended = ["Pabellón QX", *_row()]
+    medinet = make_medinet([ambulatory, surgical_pending, surgical_attended], headers=headers)
+
+    result = build_production_pending_writes(medinet, Period(7, 2026))
+
+    assert result.scope.period_scope_records == 1
+    assert result.scope.processing_scope_records == 1
+    assert len(result.pending_writes) == 1122
+    assert result.completeness.ok
+
+
+def test_invalid_ambulatory_row_still_blocks_generation(make_medinet):
+    from remasep.services.production_pipeline import InvalidPeriodRecordsError
+
+    headers = ["TIPO DE AGENDA", "DIA CITA", "FECHA NACIMIENTO", "SEXO", "SUCURSAL",
+               "ESPECIALIDAD", "TIPO DE CITA", "PRESTACIÓN", "ESTADO", "MODALIDAD",
+               "PRESTACIÓN REALIZADA"]
+    invalid = ["Ambulatoria", *_row()]
+    invalid[6] = None
+    medinet = make_medinet([invalid], headers=headers)
+
+    with pytest.raises(InvalidPeriodRecordsError) as exc:
+        build_production_pending_writes(medinet, Period(7, 2026))
+    assert exc.value.problem_counts == (("TIPO_DE_CITA_EMPTY", 1),)
+
+
 def test_out_of_period_medinet_rows_do_not_count(make_medinet, _forbid_legacy_and_artifacts):
     medinet = make_medinet([_row(), _row(dia=date(2026, 8, 10))])
     _run, _b, scope = build_production_metric_values(medinet, Period(7, 2026))
