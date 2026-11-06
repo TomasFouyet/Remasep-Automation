@@ -229,19 +229,24 @@ def _scope_selection(medinet: MedinetFrame, period: Period) -> _ScopeSelection:
     masks = medinet.blank_masks
     structural_empty = structural_empty_mask(medinet)
     active = ~structural_empty
+    eligible = active
+    if "TIPO_DE_AGENDA" in frame:
+        agenda = frame["TIPO_DE_AGENDA"].astype("string").str.strip().str.casefold()
+        eligible = active & agenda.eq("ambulatoria").fillna(False)
     dia = frame["DIA_CITA"]
     fnac = frame["FECHA_NACIMIENTO"]
-    dia_bad = active & dia.isna()
+    dia_bad = eligible & dia.isna()
     fnac_blank = masks["FECHA_NACIMIENTO"]
-    fnac_present_bad = active & (~fnac_blank) & fnac.isna()
-    sexo_empty = active & masks["SEXO"]
-    tipo_empty = active & masks["TIPO_DE_CITA"]
-    prest_empty = active & masks["PRESTACION"]
+    fnac_present_bad = eligible & (~fnac_blank) & fnac.isna()
+    sexo_empty = eligible & masks["SEXO"]
+    tipo_empty = eligible & masks["TIPO_DE_CITA"]
+    prest_empty = eligible & masks["PRESTACION"]
     invalid_mask = dia_bad | fnac_present_bad | sexo_empty | tipo_empty
     valid_mask = active & ~invalid_mask
-    birth_after = active & (~dia.isna()) & (~fnac_blank) & (~fnac.isna()) & (fnac > dia)
+    birth_after = eligible & (~dia.isna()) & (~fnac_blank) & (~fnac.isna()) & (fnac > dia)
     scope_mask = (
         valid_mask
+        & eligible
         & dia.dt.year.eq(period.year)
         & dia.dt.month.eq(period.month)
     ).fillna(False).astype(bool)

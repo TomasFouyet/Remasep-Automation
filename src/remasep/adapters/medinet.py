@@ -44,12 +44,14 @@ OPTIONAL_FIELDS = (
     "ESTADO",
     "MODALIDAD",
     "PRESTACION_REALIZADA",
+    "TIPO_DE_AGENDA",
 )
 DATE_FIELDS = ("DIA_CITA", "FECHA_NACIMIENTO")
 
 # Alias de encabezado -> nombre semántico. Solo alias documentados y testeados;
 # la clave ya está pasada por normalize_field_name (MAYÚSCULAS, sin tildes, "_").
 _HEADER_ALIASES: dict[str, str] = {
+    "TIPO_DE_AGENDA": "TIPO_DE_AGENDA",
     "DIA_CITA": "DIA_CITA",
     "FECHA_CITA": "DIA_CITA",
     "FECHA_DE_CITA": "DIA_CITA",
