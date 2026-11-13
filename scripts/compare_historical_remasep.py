@@ -173,20 +173,25 @@ def resolve_reference_file(
     Si el paso (3) encuentra más de un candidato, se marca ``AMBIGUOUS`` y no se
     elige ninguno. Nunca se sobreescribe ni se abre en modo escritura.
     """
-    exact = data_dir / requested_name
-    if exact.is_file():
-        return ReferenceResolution(exact, "EXACT_NAME_MATCH", requested_name)
-
     if not data_dir.is_dir():
         return ReferenceResolution(None, "DATA_DIR_MISSING", requested_name)
 
     candidates = sorted(
         p for p in data_dir.iterdir() if p.is_file() and p.suffix.casefold() == ".xlsm"
     )
+    # Path.is_file() follows filesystem case rules; the label describes the
+    # actual directory entry spelling, including on Windows.
+    for candidate in candidates:
+        if candidate.name == requested_name:
+            return ReferenceResolution(candidate, "EXACT_NAME_MATCH", requested_name)
     lower_target = requested_name.casefold()
     ci_matches = [p for p in candidates if p.name.casefold() == lower_target]
     if len(ci_matches) == 1:
         return ReferenceResolution(ci_matches[0], "CASE_INSENSITIVE_MATCH", requested_name)
+    if len(ci_matches) > 1:
+        return ReferenceResolution(
+            None, "AMBIGUOUS", requested_name, tuple(p.name for p in ci_matches)
+        )
 
     token = MONTH_TOKENS_ES[month]
     fuzzy = [

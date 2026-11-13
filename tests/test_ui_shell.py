@@ -619,11 +619,18 @@ def test_output_exists_retry_reopens_save_as_not_new_report(
     assert window.state.output_path == good
 
 
-def test_run_generation_is_graceful_without_excel(medinet_file):
-    """En Linux / sin Excel: no lanza; devuelve ok=False + mensaje humano."""
+def test_run_generation_is_graceful_without_excel(medinet_file, tmp_path, monkeypatch):
+    """Simula ausencia de Excel incluso cuando el host Windows lo tiene."""
+    from remasep.services import generation_service as gs
     from remasep.ui.workers import run_generation
 
-    outcome = run_generation(medinet_file, Period(7, 2026), "x.xlsm", None)
+    monkeypatch.setattr(gs, "detect_excel_capability", lambda **_: gs.ExcelCapability(
+        platform="Windows", pywin32_available=True, excel_com_available=False,
+        excel_version=None, can_generate=False, reason="EXCEL_COM_NOT_AVAILABLE",
+    ))
+    service = gs.GenerationService(artifacts_dir=tmp_path / "diagnostics")
+    outcome = run_generation(medinet_file, Period(7, 2026), tmp_path / "x.xlsm",
+                             tmp_path / "output.xlsm", service=service)
     assert outcome.ok is False
     assert outcome.status == "EXCEL_UNAVAILABLE"
     assert outcome.human_error is not None

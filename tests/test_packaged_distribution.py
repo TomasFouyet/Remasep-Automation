@@ -59,7 +59,7 @@ def _make_medinet(path: Path) -> None:
     wb.save(path)
 
 
-def test_isolated_distribution_resolves_all_assets_and_calculates_1122(tmp_path):
+def test_isolated_distribution_resolves_all_assets_and_calculates_1207(tmp_path):
     dist = tmp_path / "dist" / "REMASEP"
     internal = dist / "_internal"
     shutil.copytree(ROOT / "src" / "remasep", internal / "remasep")
@@ -106,14 +106,18 @@ def test_isolated_distribution_resolves_all_assets_and_calculates_1122(tmp_path)
     env = os.environ.copy()
     env.pop("PYTHONPATH", None)
     completed = subprocess.run(
-        [sys.executable, "-I", str(script)],
+        # -I ignores PYTHONUTF8; explicitly align both pipe endpoints instead
+        # of losing captured diagnostics in a Windows reader-thread exception.
+        [sys.executable, "-I", "-X", "utf8", str(script)],
         cwd=outside_cwd,
         env=env,
         capture_output=True,
         text=True,
+        encoding="utf-8",
         check=False,
     )
     assert completed.returncode == 0, completed.stderr
+    assert "SMOKE OK" in completed.stdout
     assert result_file.read_text(encoding="utf-8") == (
         "1207|True|6|excel_writer_2026|CONTROL"
     )

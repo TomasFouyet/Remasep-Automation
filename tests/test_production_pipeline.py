@@ -301,10 +301,13 @@ def test_production_is_exactly_the_phase1_legacy_state_hypothesis():
     baseline_mv = [x for x in new.run.metric_values if x.source_metric_id.startswith("LEGACY::")]
     baseline_pending = [x for x in new.pending_writes if x.instruction_id.startswith("wi:")]
     assert len(new.run.metric_values) == len(new.pending_writes) == 1207
-    assert len(baseline_mv) == audit_b["metric_values"] == 1122
-    assert len(baseline_pending) == audit_b["pending_writes"] == 1122
-    assert sum(1 for x in baseline_mv if x.value) == audit_b["nonzero_metric_values"]
-    assert sum(x.value for x in baseline_mv) == audit_b["sum_of_all_counts"] == 928
+    assert len(new.run.metric_values) == audit_b["metric_values"] == 1207
+    assert len(new.pending_writes) == audit_b["pending_writes"] == 1207
+    assert sum(1 for x in new.run.metric_values if x.value) == audit_b["nonzero_metric_values"]
+    assert sum(x.value for x in new.run.metric_values) == audit_b["sum_of_all_counts"]
+    assert len(baseline_mv) == len(baseline_pending) == 1122
+    assert sum(1 for x in baseline_mv if x.value) == 187
+    assert sum(x.value for x in baseline_mv) == 928
 
     old_map = {
         p.instruction_id: (p.source_metric_id, p.target_sheet, p.target_cell, p.value)
