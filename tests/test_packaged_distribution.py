@@ -115,7 +115,7 @@ def test_isolated_distribution_resolves_all_assets_and_calculates_1122(tmp_path)
     )
     assert completed.returncode == 0, completed.stderr
     assert result_file.read_text(encoding="utf-8") == (
-        "1122|True|6|excel_writer_2026|CONTROL"
+        "1207|True|6|excel_writer_2026|CONTROL"
     )
 
 

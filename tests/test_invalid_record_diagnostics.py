@@ -99,7 +99,7 @@ def test_invalid_record_from_another_month_does_not_block_selected_period(make_m
     assert summary.validation_blocked is False
 
     production = build_production_pending_writes(medinet, PERIOD)
-    assert len(production.pending_writes) == 1122
+    assert len(production.pending_writes) == 1207
     assert production.completeness.ok is True
 
 
@@ -129,7 +129,7 @@ def test_fully_valid_input_keeps_current_production_behavior(make_medinet):
     production = build_production_pending_writes(medinet, PERIOD)
     assert production.scope.period_scope_records == 2
     assert production.scope.processing_scope_records == 2
-    assert len(production.pending_writes) == 1122
+    assert len(production.pending_writes) == 1207
     assert production.completeness.ok is True
 
 

@@ -486,7 +486,7 @@ def run_month(
     *,
     pipeline: Callable[..., ProductionResult] = build_production_pending_writes,
 ) -> MonthOutcome:
-    """Ejecuta el pipeline PRODUCTIVO para ``(month, year)`` y compara sus 1122
+    """Ejecuta el pipeline PRODUCTIVO para ``(month, year)`` y compara sus
     PendingWrites contra el REMASEP histórico correspondiente. Sólo lectura."""
     period = Period(month, year)
     requested_name = REQUESTED_REFERENCE_FILES[month]
@@ -736,7 +736,7 @@ def build_report_md(
         (
             "Diagnóstico de sólo lectura. Compara el pipeline PRODUCTIVO actual "
             "(`build_production_pending_writes`) contra los REMASEP históricos reales, "
-            "restringido a las 1122 celdas del `write_manifest` (automatización "
+            "restringido a las celdas del `write_manifest` vigente (automatización "
             "basada en `detalle_citas`). No se modificó ninguna lógica productiva, "
             "regla de clasificación, filtro ESTADO ni archivo histórico."
         ),
@@ -914,7 +914,7 @@ def write_outputs(output_dir: Path, outcomes: list[MonthOutcome]) -> dict:
 
     summary_json = {
         "generated_at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "scope": "solo las 1122 celdas del write_manifest (automatización detalle_citas)",
+        "scope": "solo las celdas del write_manifest vigente (automatización detalle_citas)",
         "months": [month_summary_row(o) for o in outcomes],
         "total_compared": sum(len(o.detail_rows) for o in outcomes),
         "total_real_mismatches": axis_breakdown["total_real_mismatch"],

@@ -30,9 +30,10 @@ def test_committed_bundle_loads_and_validates():
     bundle = load_runtime_bundle(_REAL_ROOT)
     assert bundle.version == "runtime_2026"
     assert bundle.template_fingerprint_id == "stf:dc624775927d4d4d"
-    assert bundle.expected_instruction_count == 1122
-    assert len(bundle.write_instructions) == 1122
-    assert len(set(bundle.instruction_ids)) == 1122
+    assert bundle.expected_instruction_count == 1207
+    assert len(bundle.write_instructions) == 1207
+    assert len(set(bundle.instruction_ids)) == 1207
+    assert sum(w.instruction_id.startswith("medinet:2026:") for w in bundle.write_instructions) == 85
     assert bundle.detail_sheet == "Atenciones - Detalles de citas"
     assert set(bundle.detail_columns_map) >= {"DIA_CITA", "SEXO", "PRESTACION", "ESTADO"}
     assert bundle.zero_write_policy == "WRITE_ZERO"

@@ -139,8 +139,8 @@ def test_production_builds_1122_pending_writes_from_runtime_only(
     assert result.estado_filter_status == "CONFIRMED"
     assert result.scope.estado_filter_applied is True
     assert result.scope.processing_scope_records == 3
-    assert len(result.run.metric_values) == 1122
-    assert len(result.pending_writes) == 1122
+    assert len(result.run.metric_values) == 1207
+    assert len(result.pending_writes) == 1207
     assert result.completeness.ok is True
     assert not result.completeness.missing
     assert not result.completeness.duplicate
@@ -186,7 +186,7 @@ def test_non_ambulatory_rows_are_excluded_before_structural_validation(make_medi
 
     assert result.scope.period_scope_records == 1
     assert result.scope.processing_scope_records == 1
-    assert len(result.pending_writes) == 1122
+    assert len(result.pending_writes) == 1207
     assert result.completeness.ok
 
 
@@ -244,10 +244,11 @@ def test_july_2026_production_scope_and_metrics_match_audit():
     assert s.estado_filter_applied is True
 
     mv = result.run.metric_values
-    assert len(mv) == 1122
-    assert len(result.pending_writes) == 1122
-    assert sum(1 for x in mv if x.value) == 187        # no-cero
-    assert sum(x.value for x in mv) == 928             # suma de conteos
+    baseline = [x for x in mv if x.source_metric_id.startswith("LEGACY::")]
+    assert len(mv) == 1207 and len(baseline) == 1122
+    assert len(result.pending_writes) == 1207
+    assert sum(1 for x in baseline if x.value) == 187
+    assert sum(x.value for x in baseline) == 928
     assert result.completeness.ok is True
     assert result.run.value_type_conflicts == []
     assert result.run.unsupported == []
@@ -297,10 +298,13 @@ def test_production_is_exactly_the_phase1_legacy_state_hypothesis():
     new = build_production_pending_writes(_MEDINET_REAL, period)
 
     assert new.scope.processing_scope_records == audit_b["scope_records"] == 1364
-    assert len(new.run.metric_values) == audit_b["metric_values"] == 1122
-    assert len(new.pending_writes) == audit_b["pending_writes"] == 1122
-    assert sum(1 for x in new.run.metric_values if x.value) == audit_b["nonzero_metric_values"]
-    assert sum(x.value for x in new.run.metric_values) == audit_b["sum_of_all_counts"] == 928
+    baseline_mv = [x for x in new.run.metric_values if x.source_metric_id.startswith("LEGACY::")]
+    baseline_pending = [x for x in new.pending_writes if x.instruction_id.startswith("wi:")]
+    assert len(new.run.metric_values) == len(new.pending_writes) == 1207
+    assert len(baseline_mv) == audit_b["metric_values"] == 1122
+    assert len(baseline_pending) == audit_b["pending_writes"] == 1122
+    assert sum(1 for x in baseline_mv if x.value) == audit_b["nonzero_metric_values"]
+    assert sum(x.value for x in baseline_mv) == audit_b["sum_of_all_counts"] == 928
 
     old_map = {
         p.instruction_id: (p.source_metric_id, p.target_sheet, p.target_cell, p.value)
@@ -308,9 +312,9 @@ def test_production_is_exactly_the_phase1_legacy_state_hypothesis():
     }
     new_map = {
         p.instruction_id: (p.source_metric_id, p.target_sheet, p.target_cell, p.value)
-        for p in new.pending_writes
+        for p in baseline_pending
     }
     assert old_map == new_map
     old_mv = {mv.source_metric_id: mv.value for mv in old_run.metric_values}
-    new_mv = {mv.source_metric_id: mv.value for mv in new.run.metric_values}
+    new_mv = {mv.source_metric_id: mv.value for mv in baseline_mv}
     assert old_mv == new_mv

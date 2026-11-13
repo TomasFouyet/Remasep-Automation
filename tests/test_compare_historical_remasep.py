@@ -439,7 +439,7 @@ def test_historical_regression_uses_real_pipeline_end_to_end(make_medinet):
     outcomes = chr_script.historical_regression(medinet, "data/local", months=[7])
     assert len(outcomes) == 1
     assert outcomes[0].status == "COMPARED"
-    assert outcomes[0].pending_write_count == 1122
+    assert outcomes[0].pending_write_count == 1207
 
 
 # ---------------------------------------------------------------------------
@@ -467,6 +467,21 @@ _KNOWN_MONTH_RESULTS = {
 }
 
 
+def _baseline_counts(outcome):
+    """The locked April–July comparisons cover the original 1,122 destinations."""
+    from collections import Counter
+
+    rows = [r for r in outcome.detail_rows if r["instruction_id"].startswith("wi:")]
+    counts = Counter(r["comparison_status"] for r in rows)
+    assert len(rows) == 1122
+    return {
+        "exact_match": counts["EXACT_MATCH"],
+        "zero_vs_blank": counts["ZERO_VS_BLANK_EQUIVALENT"],
+        "real_mismatch": counts["REAL_MISMATCH"],
+        "unavailable": counts["REFERENCE_UNAVAILABLE"],
+    }
+
+
 @pytest.mark.skipif(not _local_available, reason="requiere data/local de desarrollo")
 def test_july_2026_historical_regression_matches_known_numbers():
     outcomes = chr_script.historical_regression(_MEDINET_REAL, _DATA_LOCAL, months=[7])
@@ -475,16 +490,13 @@ def test_july_2026_historical_regression_matches_known_numbers():
     assert outcome.status == "COMPARED"
     assert outcome.reference.available
     assert outcome.reference.match_kind == "EXACT_NAME_MATCH"
-    row = chr_script.month_summary_row(outcome)
+    row = _baseline_counts(outcome)
     expected = _KNOWN_MONTH_RESULTS[7]
-    assert row["compared"] == 1122
+    assert outcome.pending_write_count == 1207
     assert row["exact_match"] == expected["exact_match"]
     assert row["zero_vs_blank"] == expected["zero_vs_blank"]
     assert row["real_mismatch"] == expected["real_mismatch"]
     assert row["unavailable"] == expected["unavailable"]
-    assert row["equivalence_rate"] == pytest.approx(
-        (expected["exact_match"] + expected["zero_vs_blank"]) / 1122
-    )
 
 
 @pytest.mark.skipif(
@@ -503,9 +515,8 @@ def test_april_to_july_2026_historical_regression_matches_known_numbers():
         assert outcome.status == "COMPARED"
         assert outcome.reference.available
         assert outcome.completeness_ok
-        assert outcome.pending_write_count == 1122
-        row = chr_script.month_summary_row(outcome)
-        assert row["compared"] == 1122
+        assert outcome.pending_write_count == 1207
+        row = _baseline_counts(outcome)
         assert row["exact_match"] == expected["exact_match"]
         assert row["zero_vs_blank"] == expected["zero_vs_blank"]
         assert row["real_mismatch"] == expected["real_mismatch"]
