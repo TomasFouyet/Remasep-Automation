@@ -50,6 +50,20 @@ def test_check_dist_passes_on_a_correct_build(tmp_path):
     assert result.ok, [c for c in result.checks if not c[1]]
 
 
+def test_parent_appdata_local_is_not_a_bundle_data_leak(tmp_path):
+    dist = _make_good_dist(tmp_path / "AppData" / "Local")
+    assert bst.check_dist(dist).ok
+    # A real nested data/local directory must still fail under this parent.
+    (dist / "_internal" / "data" / "local").mkdir(parents=True)
+    assert not bst.check_dist(dist).ok
+
+
+def test_embedded_appdata_name_is_not_a_data_component(tmp_path):
+    dist = _make_good_dist(tmp_path)
+    (dist / "_internal" / "AppData" / "Local").mkdir(parents=True)
+    assert bst.check_dist(dist).ok
+
+
 def test_check_dist_fails_when_exe_missing(tmp_path):
     dist = _make_good_dist(tmp_path)
     (dist / "REMASEP.exe").unlink()

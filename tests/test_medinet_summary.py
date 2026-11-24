@@ -88,6 +88,31 @@ def test_pending_sources_present(make_medinet):
     assert any("Egresos" in p for p in s.pending_sources)
 
 
+def test_summary_explains_agenda_exclusion_and_manifest_coverage(make_medinet):
+    from remasep.services.runtime_assets import load_runtime_bundle
+
+    headers = ["TIPO DE AGENDA", "DIA CITA", "FECHA NACIMIENTO", "SEXO", "SUCURSAL",
+               "ESPECIALIDAD", "TIPO DE CITA", "PRESTACIÓN", "ESTADO", "MODALIDAD",
+               "PRESTACIÓN REALIZADA"]
+    surgical = ["Pabellón QX", *_row()]
+    surgical[6] = None  # no debe bloquear ni contarse como cita ambulatoria
+    source = make_medinet([
+        ["Ambulatoria", *_row()],
+        ["Ambulatoria", *_row(estado="Cancelado")],
+        surgical,
+    ], headers=headers)
+    s = build_monthly_medinet_summary(source, Period(7, 2026))
+    assert s.dated_period_records == 3
+    assert s.agenda_filter_applied
+    assert s.agenda_excluded_records == 1
+    assert s.period_scope_records == 2
+    assert (s.included_records, s.excluded_records, s.invalid_records) == (1, 1, 0)
+    assert s.planned_write_count == load_runtime_bundle().expected_instruction_count == 1207
+    assert {x.label: x.count for x in s.write_targets_by_sheet} == {
+        "REMASEP 01": 242, "REMASEP_OD": 952, "B2 ANEXO": 13,
+    }
+
+
 # ------------------------------------------------------------------
 # Escenario real Julio 2026 — coincide con el pipeline (gated)
 # ------------------------------------------------------------------

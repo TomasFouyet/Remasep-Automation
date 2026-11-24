@@ -99,7 +99,7 @@ def test_invalid_record_from_another_month_does_not_block_selected_period(make_m
     assert summary.validation_blocked is False
 
     production = build_production_pending_writes(medinet, PERIOD)
-    assert len(production.pending_writes) == 1122
+    assert len(production.pending_writes) == 1207
     assert production.completeness.ok is True
 
 
@@ -129,7 +129,7 @@ def test_fully_valid_input_keeps_current_production_behavior(make_medinet):
     production = build_production_pending_writes(medinet, PERIOD)
     assert production.scope.period_scope_records == 2
     assert production.scope.processing_scope_records == 2
-    assert len(production.pending_writes) == 1122
+    assert len(production.pending_writes) == 1207
     assert production.completeness.ok is True
 
 
@@ -150,5 +150,7 @@ def test_dashboard_shows_invalid_diagnostic_and_disables_generation(
         assert "1 registro inválido" in dashboard._validation_warning.text()
         assert "Ningún registro inválido fue contado" in dashboard._validation_warning.text()
         assert dashboard.generate_button.isEnabled() is False
+        assert dashboard.kpi_writes._value.text() == "—"
+        assert "Corrige los registros inválidos" in dashboard._readiness.text()
     finally:
         window.close()

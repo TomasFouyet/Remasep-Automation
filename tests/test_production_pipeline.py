@@ -139,8 +139,8 @@ def test_production_builds_1122_pending_writes_from_runtime_only(
     assert result.estado_filter_status == "CONFIRMED"
     assert result.scope.estado_filter_applied is True
     assert result.scope.processing_scope_records == 3
-    assert len(result.run.metric_values) == 1122
-    assert len(result.pending_writes) == 1122
+    assert len(result.run.metric_values) == 1207
+    assert len(result.pending_writes) == 1207
     assert result.completeness.ok is True
     assert not result.completeness.missing
     assert not result.completeness.duplicate
@@ -170,6 +170,39 @@ def test_production_applies_confirmed_estado_filter(make_medinet, _forbid_legacy
     assert scope.estado_filter_applied is True
     assert scope.estado_excluded_records == 3
     assert scope.processing_scope_records == 2
+
+
+def test_non_ambulatory_rows_are_excluded_before_structural_validation(make_medinet):
+    headers = ["TIPO DE AGENDA", "DIA CITA", "FECHA NACIMIENTO", "SEXO", "SUCURSAL",
+               "ESPECIALIDAD", "TIPO DE CITA", "PRESTACIÓN", "ESTADO", "MODALIDAD",
+               "PRESTACIÓN REALIZADA"]
+    ambulatory = ["Ambulatoria", *_row()]
+    surgical_pending = ["Pabellón QX", *_row(estado="Agendado")]
+    surgical_pending[6] = None  # TIPO DE CITA
+    surgical_attended = ["Pabellón QX", *_row()]
+    medinet = make_medinet([ambulatory, surgical_pending, surgical_attended], headers=headers)
+
+    result = build_production_pending_writes(medinet, Period(7, 2026))
+
+    assert result.scope.period_scope_records == 1
+    assert result.scope.processing_scope_records == 1
+    assert len(result.pending_writes) == 1207
+    assert result.completeness.ok
+
+
+def test_invalid_ambulatory_row_still_blocks_generation(make_medinet):
+    from remasep.services.production_pipeline import InvalidPeriodRecordsError
+
+    headers = ["TIPO DE AGENDA", "DIA CITA", "FECHA NACIMIENTO", "SEXO", "SUCURSAL",
+               "ESPECIALIDAD", "TIPO DE CITA", "PRESTACIÓN", "ESTADO", "MODALIDAD",
+               "PRESTACIÓN REALIZADA"]
+    invalid = ["Ambulatoria", *_row()]
+    invalid[6] = None
+    medinet = make_medinet([invalid], headers=headers)
+
+    with pytest.raises(InvalidPeriodRecordsError) as exc:
+        build_production_pending_writes(medinet, Period(7, 2026))
+    assert exc.value.problem_counts == (("TIPO_DE_CITA_EMPTY", 1),)
 
 
 def test_out_of_period_medinet_rows_do_not_count(make_medinet, _forbid_legacy_and_artifacts):
@@ -211,10 +244,11 @@ def test_july_2026_production_scope_and_metrics_match_audit():
     assert s.estado_filter_applied is True
 
     mv = result.run.metric_values
-    assert len(mv) == 1122
-    assert len(result.pending_writes) == 1122
-    assert sum(1 for x in mv if x.value) == 187        # no-cero
-    assert sum(x.value for x in mv) == 928             # suma de conteos
+    baseline = [x for x in mv if x.source_metric_id.startswith("LEGACY::")]
+    assert len(mv) == 1207 and len(baseline) == 1122
+    assert len(result.pending_writes) == 1207
+    assert sum(1 for x in baseline if x.value) == 187
+    assert sum(x.value for x in baseline) == 928
     assert result.completeness.ok is True
     assert result.run.value_type_conflicts == []
     assert result.run.unsupported == []
@@ -264,10 +298,16 @@ def test_production_is_exactly_the_phase1_legacy_state_hypothesis():
     new = build_production_pending_writes(_MEDINET_REAL, period)
 
     assert new.scope.processing_scope_records == audit_b["scope_records"] == 1364
-    assert len(new.run.metric_values) == audit_b["metric_values"] == 1122
-    assert len(new.pending_writes) == audit_b["pending_writes"] == 1122
+    baseline_mv = [x for x in new.run.metric_values if x.source_metric_id.startswith("LEGACY::")]
+    baseline_pending = [x for x in new.pending_writes if x.instruction_id.startswith("wi:")]
+    assert len(new.run.metric_values) == len(new.pending_writes) == 1207
+    assert len(new.run.metric_values) == audit_b["metric_values"] == 1207
+    assert len(new.pending_writes) == audit_b["pending_writes"] == 1207
     assert sum(1 for x in new.run.metric_values if x.value) == audit_b["nonzero_metric_values"]
-    assert sum(x.value for x in new.run.metric_values) == audit_b["sum_of_all_counts"] == 928
+    assert sum(x.value for x in new.run.metric_values) == audit_b["sum_of_all_counts"]
+    assert len(baseline_mv) == len(baseline_pending) == 1122
+    assert sum(1 for x in baseline_mv if x.value) == 187
+    assert sum(x.value for x in baseline_mv) == 928
 
     old_map = {
         p.instruction_id: (p.source_metric_id, p.target_sheet, p.target_cell, p.value)
@@ -275,9 +315,9 @@ def test_production_is_exactly_the_phase1_legacy_state_hypothesis():
     }
     new_map = {
         p.instruction_id: (p.source_metric_id, p.target_sheet, p.target_cell, p.value)
-        for p in new.pending_writes
+        for p in baseline_pending
     }
     assert old_map == new_map
     old_mv = {mv.source_metric_id: mv.value for mv in old_run.metric_values}
-    new_mv = {mv.source_metric_id: mv.value for mv in new.run.metric_values}
+    new_mv = {mv.source_metric_id: mv.value for mv in baseline_mv}
     assert old_mv == new_mv

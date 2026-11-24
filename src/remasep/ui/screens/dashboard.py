@@ -1,8 +1,4 @@
-"""Pantalla 'Resumen mensual' — fuente **Medinet** únicamente.
-
-KPIs + 4 gráficos agregados (sin PII). Desde aquí se exporta el PDF y se lanza
-la generación del REMASEP.
-"""
+"""Preparación del borrador: alcance, pendientes y detalle agregado Medinet."""
 
 from __future__ import annotations
 
@@ -22,19 +18,24 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from remasep.services.medinet_summary import MonthlyMedinetSummary
+from remasep.services.medinet_summary import MANUAL_REVIEW, MonthlyMedinetSummary
 from remasep.ui.charts import Bar, BarChartCard
 from remasep.ui.components.step_indicator import StepIndicator
 from remasep.ui.components.widgets import Card, MetricCard, SectionHeader, StatusBadge
 from remasep.ui.operation_lifecycle import OperationKind
 from remasep.ui.pdf_report import export_summary_pdf, suggested_pdf_name
-from remasep.ui.styles import THEME
+from remasep.ui.styles import THEME, format_int
 
 _STEPS = ["Datos", "Análisis", "Resumen", "Informe"]
 _DISCLAIMER = (
-    "Este resumen corresponde a los datos disponibles en Medinet y no representa "
-    "todavía la totalidad del informe REMASEP."
+    "Puedes preparar un borrador con Medinet. Antes de enviarlo debes completar "
+    "los datos pendientes y revisar CONTROL en Excel."
 )
+_SHEET_DESCRIPTIONS = {
+    "REMASEP 01": "Consultas y otras atenciones ambulatorias.",
+    "REMASEP_OD": "Consultas, controles y tratamientos odontológicos.",
+    "B2 ANEXO": "Procedimientos seleccionados que se pueden contar desde Medinet.",
+}
 
 
 class DashboardScreen(QWidget):
@@ -49,7 +50,7 @@ class DashboardScreen(QWidget):
         header = QHBoxLayout()
         title_box = QVBoxLayout()
         title_box.setSpacing(2)
-        self._title = QLabel("Resumen mensual")
+        self._title = QLabel("¿Qué incluirá el borrador?")
         self._title.setProperty("role", "h2")
         self._period = QLabel()
         self._period.setProperty("role", "subtitle")
@@ -57,11 +58,12 @@ class DashboardScreen(QWidget):
         title_box.addWidget(self._period)
         header.addLayout(title_box)
         header.addStretch()
-        header.addWidget(StatusBadge("FUENTE: MEDINET", kind="info"), alignment=Qt.AlignmentFlag.AlignTop)
+        header.addWidget(StatusBadge("BORRADOR PARCIAL", kind="warning"), alignment=Qt.AlignmentFlag.AlignTop)
 
         disclaimer = QLabel(_DISCLAIMER)
-        disclaimer.setProperty("role", "faint")
+        disclaimer.setProperty("role", "muted")
         disclaimer.setWordWrap(True)
+        self._readiness = disclaimer
 
         self._validation_warning = QLabel()
         self._validation_warning.setObjectName("bannerError")
@@ -70,24 +72,55 @@ class DashboardScreen(QWidget):
 
         # --- KPIs ---
         self.kpi_period = MetricCard(
-            "Citas del período", hint="Válidas e inválidas detectadas dentro del mes"
+            "Citas revisadas", hint="Antes de excluir por estado"
         )
         self.kpi_included = MetricCard(
-            "Consideradas para REMASEP", hint="Sólo estados confirmados", accent=True
+            "Citas que se usarán", hint="Según agenda, estado y período", accent=True
         )
         self.kpi_excluded = MetricCard(
             "Excluidas por estado", hint="Canceladas, no presentadas, etc."
         )
-        self.kpi_ratio = MetricCard("Porcentaje considerado")
+        self.kpi_writes = MetricCard("Celdas previstas", hint="No es un conteo de citas")
         kpi_row = QHBoxLayout()
         kpi_row.setSpacing(THEME.gap)
-        for card in (self.kpi_period, self.kpi_included, self.kpi_excluded, self.kpi_ratio):
+        for card in (self.kpi_included, self.kpi_writes, self.kpi_period, self.kpi_excluded):
             kpi_row.addWidget(card)
+
+        self._scope_note = QLabel()
+        self._scope_note.setWordWrap(True)
+        self._scope_note.setProperty("role", "muted")
+        self._included_states = QLabel()
+        self._included_states.setWordWrap(True)
+        self._included_states.setProperty("role", "faint")
+
+        coverage = Card()
+        coverage.body.addWidget(SectionHeader("La app completará", hint="Sólo los campos automatizados de estas hojas."))
+        self._coverage_list = QVBoxLayout()
+        coverage.body.addLayout(self._coverage_list)
+        coverage.body.addWidget(_wrapped(
+            "Usa la plantilla oficial en blanco. El resto de sus campos no se completa "
+            "automáticamente. Las fórmulas y macros se conservan.", faint=True
+        ))
+
+        self._pending_card = Card(muted=True)
+        self._pending_card.body.addWidget(SectionHeader("Completar o revisar antes del envío"))
+        for text in MANUAL_REVIEW:
+            self._pending_card.body.addWidget(_wrapped(f"• {text}"))
+        self._pending_list = QVBoxLayout()
+        self._pending_card.body.addLayout(self._pending_list)
+        self._pending_card.body.addWidget(_wrapped(
+            "CONTROL se comprueba después de generar. Esta pantalla no confirma "
+            "que el informe esté completo ni libre de alertas.", faint=True
+        ))
+        preparation = QHBoxLayout()
+        preparation.setSpacing(THEME.gap)
+        preparation.addWidget(coverage, stretch=1)
+        preparation.addWidget(self._pending_card, stretch=1)
 
         # --- gráficos ---
         self.chart_estado = BarChartCard(
             "Distribución por estado",
-            subtitle="Se consideran únicamente los estados confirmados para REMASEP.",
+            subtitle="Estados incluidos y excluidos según la regla aplicada.",
             legend=[("Consideradas", THEME.chart_included), ("Excluidas", THEME.chart_excluded)],
         )
         self.chart_service = BarChartCard(
@@ -96,24 +129,19 @@ class DashboardScreen(QWidget):
         )
         self.chart_sex = BarChartCard("Consideradas por sexo")
         self.chart_age = BarChartCard("Consideradas por tramo de edad")
-        charts = QGridLayout()
+        self._charts_container = QWidget()
+        charts = QGridLayout(self._charts_container)
+        charts.setContentsMargins(0, 0, 0, 0)
         charts.setSpacing(THEME.gap)
         charts.addWidget(self.chart_estado, 0, 0)
         charts.addWidget(self.chart_service, 0, 1)
         charts.addWidget(self.chart_sex, 1, 0)
         charts.addWidget(self.chart_age, 1, 1)
 
-        # --- pendientes de otras fuentes ---
-        self._pending_card = Card(muted=True)
-        self._pending_card.body.addWidget(
-            SectionHeader(
-                "Pendientes de otras fuentes",
-                hint="Estas secciones del REMASEP se completarán en próximas versiones.",
-            )
-        )
-        self._pending_list = QVBoxLayout()
-        self._pending_list.setSpacing(4)
-        self._pending_card.body.addLayout(self._pending_list)
+        self.details_button = QPushButton("Ver detalle de las citas: estado, especialidad, sexo y edad")
+        self.details_button.setCheckable(True)
+        self.details_button.toggled.connect(self._charts_container.setVisible)
+        self._charts_container.setVisible(False)
 
         # --- contenido desplazable ---
         content = QWidget()
@@ -122,8 +150,11 @@ class DashboardScreen(QWidget):
         content_layout.setSpacing(THEME.gap_lg)
         content_layout.addLayout(kpi_row)
         content_layout.addWidget(self._validation_warning)
-        content_layout.addLayout(charts)
-        content_layout.addWidget(self._pending_card)
+        content_layout.addWidget(self._scope_note)
+        content_layout.addWidget(self._included_states)
+        content_layout.addLayout(preparation)
+        content_layout.addWidget(self.details_button)
+        content_layout.addWidget(self._charts_container)
         content_layout.addStretch()
 
         scroll = QScrollArea()
@@ -135,9 +166,9 @@ class DashboardScreen(QWidget):
         self.back_button = QPushButton("Volver")
         self.back_button.setProperty("variant", "ghost")
         self.back_button.clicked.connect(lambda: self._app.navigate("new_report"))
-        self.pdf_button = QPushButton("Exportar resumen PDF")
+        self.pdf_button = QPushButton("Exportar estadísticas PDF")
         self.pdf_button.clicked.connect(self._export_pdf)
-        self.generate_button = QPushButton("Generar REMASEP")
+        self.generate_button = QPushButton("Generar borrador REMASEP")
         self.generate_button.setProperty("variant", "primary")
         self.generate_button.clicked.connect(lambda: self._app.navigate("generate"))
         self._app.operations.operation_finished.connect(self._sync_generate_button)
@@ -172,8 +203,32 @@ class DashboardScreen(QWidget):
         self.kpi_period.set_value(s.period_scope_records)
         self.kpi_included.set_value(s.included_records)
         self.kpi_excluded.set_value(s.excluded_records)
-        self.kpi_ratio.set_value(f"{s.included_percentage:g}%")
-        self.kpi_ratio.set_hint(s.considered_ratio_label)
+        self.kpi_writes.set_value(
+            s.planned_write_count if s.planned_write_count and not s.validation_blocked else "—"
+        )
+        self.kpi_writes.set_hint(
+            "Generación bloqueada por datos inválidos" if s.validation_blocked else
+            f"En {len(s.write_targets_by_sheet)} hojas; no son citas"
+            if s.write_targets_by_sheet else "Alcance pendiente de cargar"
+        )
+        self._readiness.setText(
+            "Corrige los registros inválidos de Medinet antes de preparar el borrador."
+            if s.validation_blocked else _DISCLAIMER
+        )
+        self.kpi_period.set_hint(
+            "Ambulatorias, antes de excluir por estado"
+            if s.agenda_filter_applied else "Agenda no informada; antes de excluir por estado"
+        )
+        if s.dated_period_records is not None:
+            self._scope_note.setText(
+                f"En el archivo: {format_int(s.dated_period_records)} citas con fecha en el mes. "
+                f"Fuera por agenda: {format_int(s.agenda_excluded_records)}. "
+                f"Fuera por estado: {format_int(s.excluded_records)}. "
+                f"Registros inválidos relevantes: {format_int(s.invalid_records)}."
+            )
+        else:
+            self._scope_note.setText("Resumen de citas del período seleccionado.")
+        self._included_states.setText("Estados incluidos: " + ", ".join(s.estado_included_states) + ".")
         if s.validation_blocked:
             noun = "registro inválido" if s.invalid_records == 1 else "registros inválidos"
             self._validation_warning.setText(
@@ -195,14 +250,31 @@ class DashboardScreen(QWidget):
         self.chart_sex.set_bars(_series_bars(s.sex_distribution))
         self.chart_age.set_bars(_series_bars(s.age_distribution))
 
+        while self._coverage_list.count():
+            item = self._coverage_list.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        order = {name: i for i, name in enumerate(_SHEET_DESCRIPTIONS)}
+        for entry in sorted(s.write_targets_by_sheet, key=lambda e: (order.get(e.label, 99), e.label)):
+            group = QWidget()
+            body = QVBoxLayout(group)
+            body.setContentsMargins(0, 0, 0, 0)
+            body.setSpacing(2)
+            body.addWidget(_wrapped(f"{entry.label}: {format_int(entry.count)} celdas previstas"))
+            if entry.label in _SHEET_DESCRIPTIONS:
+                body.addWidget(_wrapped(_SHEET_DESCRIPTIONS[entry.label], faint=True))
+            self._coverage_list.addWidget(group)
+        if not s.write_targets_by_sheet:
+            self._coverage_list.addWidget(_wrapped("Vuelve a analizar el archivo para cargar el alcance."))
+
         while self._pending_list.count():
             item = self._pending_list.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
-        for name in s.pending_sources:
-            row = QLabel(f"•  {name}")
-            row.setProperty("role", "muted")
-            self._pending_list.addWidget(row)
+        if s.pending_sources:
+            self._pending_list.addWidget(_wrapped(
+                "Otras fuentes necesarias: " + "; ".join(s.pending_sources) + ".", faint=True
+            ))
 
     def _sync_generate_button(self, *_args) -> None:
         summary = self._app.state.summary
@@ -253,3 +325,10 @@ def _series_bars(items) -> list[Bar]:
         Bar(c.label, c.count, THEME.chart_series[i % len(THEME.chart_series)])
         for i, c in enumerate(items)
     ]
+
+
+def _wrapped(text: str, *, faint: bool = False) -> QLabel:
+    label = QLabel(text)
+    label.setWordWrap(True)
+    label.setProperty("role", "faint" if faint else "muted")
+    return label

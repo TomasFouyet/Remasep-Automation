@@ -2,7 +2,7 @@
 version: runtime_2026
 generated_by: scripts/build_runtime_assets.py (Sprint 3.8 + 3.9 fase 2)
 template_fingerprint_id: stf:dc624775927d4d4d
-expected_instruction_count: 1122
+expected_instruction_count: 1207
 detail_sheet: Atenciones - Detalles de citas
 estado_filter_status: CONFIRMED
 zero_write_policy: WRITE_ZERO
@@ -16,8 +16,8 @@ legacy_rules:
   file: rules.yaml
   sha256: f12abf80a783c40dfc106e398ac4ad40ba7a9340a8b5bcf994a672e5c42ee2a3
 assets:
-  write_manifest.csv: 90967ee71e598dd24ab424565b1521fd9373c9178dfdfa6535929abc92ba6417
-  metric_catalog.csv: b2c70f388211049932ef029a2797a9248e27d03c0a35674640a86a6c58f51ea5
+  write_manifest.csv: 35cf1bf88d3520887461c71f388581bfeddb9d344c488d68fb9a4299e60fb361
+  metric_catalog.csv: e2f2e4be43274b44761b1a648241dad10c0c5f75ec0f78d09319a1cd26f1ec22
   detail_contract.yaml: 6f4f2814a224427abb20eb50e908ed647b0e1546295d0a0d17c09c8f305f1640
   zero_policy.yaml: 1b1f65d7783a311c336e3fd306d5bb936718a603dd7b25b953d7fff541ece7eb
   estado_filter.yaml: 3dbae07c83b95acc930422b0ceb56e2dac946af7a0888c27ba1a3ca42f3d406c

@@ -59,6 +59,26 @@ def test_legacy_hypothesis_yields_exactly_1364(result):
 
 
 def test_scope_comparison_impact_is_locked(result):
+    from dataclasses import replace
+    from unittest.mock import patch
+
+    import audit_medinet_estado as audit
+    from remasep.services.common import Period
+    from remasep.services.runtime_assets import load_runtime_bundle
+
+    # The live audit covers the expanded contract. The frozen 2026-07 golden
+    # numbers below describe only the original cohort, not the 85 additions.
+    for key in ("A_PERIOD_ONLY", "B_LEGACY_STATE_HYPOTHESIS"):
+        full = result["scope_comparison"][key]
+        assert full["metric_values"] == full["pending_writes"] == 1207
+        assert full["completeness_ok"]
+    bundle = load_runtime_bundle()
+    baseline = [w for w in bundle.write_instructions if w.instruction_id.startswith("wi:")]
+    assert len(baseline) == 1122
+    with patch.object(audit, "load_runtime_bundle", return_value=replace(
+        bundle, write_instructions=baseline, expected_instruction_count=1122
+    )):
+        result = audit.audit(_MEDINET, Period(7, 2026))
     sc = result["scope_comparison"]
     a, b = sc["A_PERIOD_ONLY"], sc["B_LEGACY_STATE_HYPOTHESIS"]
     assert (a["scope_records"], b["scope_records"]) == (2114, 1364)

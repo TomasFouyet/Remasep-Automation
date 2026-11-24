@@ -329,8 +329,32 @@ def test_dashboard_declares_medinet_source_and_disclaimer(window, medinet_file, 
 
     text = _all_label_text(window.screens["dashboard"])
     assert "MEDINET" in text.upper()
-    assert "no representa todavía la totalidad" in text
+    assert "BORRADOR PARCIAL" in text
+    assert "CONTROL" in text
+    assert "pueblos originarios" in text
+    assert "Sección A" in text
     assert "Tabla quirúrgica" in text  # card "Pendientes de otras fuentes"
+
+
+def test_dashboard_distinguishes_cells_from_citas_and_keeps_charts_optional(window, medinet_file):
+    from remasep.services.common import Period
+    from remasep.services.medinet_summary import build_monthly_medinet_summary
+
+    window.state.summary = build_monthly_medinet_summary(medinet_file, Period(7, 2026))
+    window.navigate("dashboard")
+    db = window.screens["dashboard"]
+    assert db.kpi_writes._value.text() == "1.207"
+    assert db.kpi_included._value.text() == "24"
+    text = _all_label_text(db)
+    assert "REMASEP 01: 242 celdas previstas" in text
+    assert "REMASEP_OD: 952 celdas previstas" in text
+    assert "B2 ANEXO: 13 celdas previstas" in text
+    assert "Esta pantalla no confirma" in text
+    assert "Generar borrador" in db.generate_button.text()
+    assert db.generate_button.isEnabled()
+    assert db._charts_container.isHidden()
+    db.details_button.click()
+    assert not db._charts_container.isHidden()
 
 
 def test_dashboard_without_summary_returns_to_new_report(window):
@@ -619,11 +643,18 @@ def test_output_exists_retry_reopens_save_as_not_new_report(
     assert window.state.output_path == good
 
 
-def test_run_generation_is_graceful_without_excel(medinet_file):
-    """En Linux / sin Excel: no lanza; devuelve ok=False + mensaje humano."""
+def test_run_generation_is_graceful_without_excel(medinet_file, tmp_path, monkeypatch):
+    """Simula ausencia de Excel incluso cuando el host Windows lo tiene."""
+    from remasep.services import generation_service as gs
     from remasep.ui.workers import run_generation
 
-    outcome = run_generation(medinet_file, Period(7, 2026), "x.xlsm", None)
+    monkeypatch.setattr(gs, "detect_excel_capability", lambda **_: gs.ExcelCapability(
+        platform="Windows", pywin32_available=True, excel_com_available=False,
+        excel_version=None, can_generate=False, reason="EXCEL_COM_NOT_AVAILABLE",
+    ))
+    service = gs.GenerationService(artifacts_dir=tmp_path / "diagnostics")
+    outcome = run_generation(medinet_file, Period(7, 2026), tmp_path / "x.xlsm",
+                             tmp_path / "output.xlsm", service=service)
     assert outcome.ok is False
     assert outcome.status == "EXCEL_UNAVAILABLE"
     assert outcome.human_error is not None

@@ -75,11 +75,19 @@ def check_dist(dist: Path) -> SmokeResult:
         p = dist / rel
         add(f"presente: {rel}", p.is_file(), str(p))
 
-    all_paths = [str(p).replace("\\", "/") for p in dist.rglob("*")]
+    # Inspect bundle contents, not ancestors such as Windows AppData/Local.
+    all_paths = [p.relative_to(dist).as_posix() for p in dist.rglob("*")]
     haystack = "\n".join(all_paths).lower()
 
     for needle in FORBIDDEN_NEEDLES:
-        add(f'ninguna ruta contiene "{needle}"', needle not in haystack)
+        if needle == "data/local":
+            found = any(
+                ("data", "local") in tuple(zip(parts, parts[1:]))
+                for parts in (path.lower().split("/") for path in all_paths)
+            )
+        else:
+            found = needle in haystack
+        add(f'ninguna ruta contiene "{needle}"', not found)
 
     present_forbidden = sorted(
         {name for name in FORBIDDEN_DIR_NAMES if any(p.name == name for p in dist.rglob(name))}

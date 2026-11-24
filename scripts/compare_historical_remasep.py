@@ -173,20 +173,25 @@ def resolve_reference_file(
     Si el paso (3) encuentra más de un candidato, se marca ``AMBIGUOUS`` y no se
     elige ninguno. Nunca se sobreescribe ni se abre en modo escritura.
     """
-    exact = data_dir / requested_name
-    if exact.is_file():
-        return ReferenceResolution(exact, "EXACT_NAME_MATCH", requested_name)
-
     if not data_dir.is_dir():
         return ReferenceResolution(None, "DATA_DIR_MISSING", requested_name)
 
     candidates = sorted(
         p for p in data_dir.iterdir() if p.is_file() and p.suffix.casefold() == ".xlsm"
     )
+    # Path.is_file() follows filesystem case rules; the label describes the
+    # actual directory entry spelling, including on Windows.
+    for candidate in candidates:
+        if candidate.name == requested_name:
+            return ReferenceResolution(candidate, "EXACT_NAME_MATCH", requested_name)
     lower_target = requested_name.casefold()
     ci_matches = [p for p in candidates if p.name.casefold() == lower_target]
     if len(ci_matches) == 1:
         return ReferenceResolution(ci_matches[0], "CASE_INSENSITIVE_MATCH", requested_name)
+    if len(ci_matches) > 1:
+        return ReferenceResolution(
+            None, "AMBIGUOUS", requested_name, tuple(p.name for p in ci_matches)
+        )
 
     token = MONTH_TOKENS_ES[month]
     fuzzy = [
@@ -486,7 +491,7 @@ def run_month(
     *,
     pipeline: Callable[..., ProductionResult] = build_production_pending_writes,
 ) -> MonthOutcome:
-    """Ejecuta el pipeline PRODUCTIVO para ``(month, year)`` y compara sus 1122
+    """Ejecuta el pipeline PRODUCTIVO para ``(month, year)`` y compara sus
     PendingWrites contra el REMASEP histórico correspondiente. Sólo lectura."""
     period = Period(month, year)
     requested_name = REQUESTED_REFERENCE_FILES[month]
@@ -736,7 +741,7 @@ def build_report_md(
         (
             "Diagnóstico de sólo lectura. Compara el pipeline PRODUCTIVO actual "
             "(`build_production_pending_writes`) contra los REMASEP históricos reales, "
-            "restringido a las 1122 celdas del `write_manifest` (automatización "
+            "restringido a las celdas del `write_manifest` vigente (automatización "
             "basada en `detalle_citas`). No se modificó ninguna lógica productiva, "
             "regla de clasificación, filtro ESTADO ni archivo histórico."
         ),
@@ -914,7 +919,7 @@ def write_outputs(output_dir: Path, outcomes: list[MonthOutcome]) -> dict:
 
     summary_json = {
         "generated_at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "scope": "solo las 1122 celdas del write_manifest (automatización detalle_citas)",
+        "scope": "solo las celdas del write_manifest vigente (automatización detalle_citas)",
         "months": [month_summary_row(o) for o in outcomes],
         "total_compared": sum(len(o.detail_rows) for o in outcomes),
         "total_real_mismatches": axis_breakdown["total_real_mismatch"],
