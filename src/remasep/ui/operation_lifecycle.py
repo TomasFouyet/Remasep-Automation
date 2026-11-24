@@ -1,8 +1,8 @@
 """Ownership and authorization rules for background Qt operations.
 
-The manager owns every worker/thread pair until ``QThread.finished``.  Cancelling
-an operation revokes its permission to update UI state; it never terminates the
-underlying thread.
+The manager owns every worker/thread pair through native thread teardown.
+Cancelling an operation revokes its permission to update UI state while the
+underlying thread finishes normally.
 """
 
 from __future__ import annotations
@@ -150,10 +150,7 @@ class OperationManager(QObject):
         worker.step.connect(self._on_step)
         worker.done.connect(self._on_done)
         worker.failed.connect(self._on_failed)
-        worker.done.connect(worker.deleteLater)
-        worker.failed.connect(worker.deleteLater)
-        worker.done.connect(thread.quit)
-        worker.failed.connect(thread.quit)
+        thread.finished.connect(worker.deleteLater)
         thread.finished.connect(self._on_thread_finished)
         thread.start()
         return StartResult.STARTED
@@ -216,9 +213,12 @@ class OperationManager(QObject):
         if not isinstance(thread, QThread):
             return
         run_id = str(thread.property("remasep_run_id"))
-        managed = self._operations.pop(run_id, None)
+        managed = self._operations.get(run_id)
         if managed is None:
             return
+        # Qt emits finished before deferred deletion and native thread cleanup.
+        thread.wait()
+        self._operations.pop(run_id)
         self._clear_current(managed)
         thread.deleteLater()
         self.operation_finished.emit(run_id, managed.status.value)

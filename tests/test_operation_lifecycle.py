@@ -12,10 +12,11 @@ import textwrap
 import threading
 from pathlib import Path
 
-from PySide6.QtCore import QEventLoop, QObject, QTimer, Signal, Slot
+from PySide6.QtCore import QEventLoop, QObject, QThread, QTimer, Qt, Signal, Slot
 from PySide6.QtTest import QSignalSpy
 
 from remasep.services.common import Period
+from remasep.ui import operation_lifecycle
 from remasep.ui.main_window import AppState
 from remasep.ui.operation_lifecycle import (
     OperationKind,
@@ -196,6 +197,44 @@ def test_generation_guard_rejects_second_backend_invocation(qapp, tmp_path):
     release.set()
     _wait_for(manager, finished)
     assert not manager.has_running_operations
+
+
+def test_finished_is_published_after_thread_teardown(qapp, tmp_path, monkeypatch):
+    release_teardown = threading.Event()
+    teardown_finished = threading.Event()
+
+    class TeardownThread(QThread):
+        def wait(self):
+            release_teardown.set()
+            return super().wait()
+
+    monkeypatch.setattr(operation_lifecycle, "QThread", TeardownThread)
+    manager = OperationManager()
+    finished = QSignalSpy(manager.operation_finished)
+    operation = _operation(OperationKind.GENERATION, 7, tmp_path)
+    started, release = threading.Event(), threading.Event()
+    assert manager.start(
+        operation, lambda op: _EventWorker(op, started, release, "done", []),
+    ) is StartResult.STARTED
+    assert started.wait(5)
+    thread = manager._operations[operation.run_id].thread
+
+    def finish_teardown():
+        if release_teardown.wait(5):
+            teardown_finished.set()
+
+    observed = []
+
+    def record_completion(*_args):
+        observed.append(teardown_finished.is_set())
+        release_teardown.set()
+        thread.wait()
+
+    thread.finished.connect(finish_teardown, Qt.ConnectionType.DirectConnection)
+    manager.operation_finished.connect(record_completion)
+    release.set()
+    _wait_for(manager, finished)
+    assert observed == [True]
 
 
 def test_cancelled_progress_and_failure_signals_are_ignored(qapp, tmp_path):
