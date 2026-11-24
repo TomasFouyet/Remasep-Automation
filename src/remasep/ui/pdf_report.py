@@ -28,6 +28,9 @@ _DISCLAIMER = (
     "Borrador parcial. Completar portada y datos complementarios; "
     "revisar CONTROL en Excel antes del envío."
 )
+_BLOCKED_DISCLAIMER = (
+    "Generación bloqueada. Corrige los registros inválidos de Medinet y vuelve a analizar el archivo."
+)
 
 
 class PdfExportError(RemasepError):
@@ -89,11 +92,13 @@ def report_content(s: MonthlyMedinetSummary) -> ReportContent:
         kpis=(
             _Kpi("Citas revisadas", format_int(s.period_scope_records),
                  "Antes de excluir por estado"),
-            _Kpi("Citas que se usarán", format_int(s.included_records),
+            _Kpi("Citas incluidas", format_int(s.included_records),
                  "Según agenda, estado y período"),
             _Kpi("Excluidas por estado", format_int(s.excluded_records),
                  "Canceladas, no presentadas, etc."),
-            _Kpi("Celdas previstas", format_int(s.planned_write_count) if s.planned_write_count else "—",
+            _Kpi("Celdas previstas",
+                 format_int(s.planned_write_count) if s.planned_write_count and not s.validation_blocked else "—",
+                 "Generación bloqueada" if s.validation_blocked else
                  f"En {len(s.write_targets_by_sheet)} hojas; no son citas"),
         ),
         charts=(
@@ -113,7 +118,7 @@ def report_content(s: MonthlyMedinetSummary) -> ReportContent:
         ),
         footer_left=_FOOTER_SOURCE,
         footer_right=_FOOTER_APP,
-        disclaimer=_DISCLAIMER,
+        disclaimer=_BLOCKED_DISCLAIMER if s.validation_blocked else _DISCLAIMER,
     )
 
 

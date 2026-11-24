@@ -75,7 +75,7 @@ class DashboardScreen(QWidget):
             "Citas revisadas", hint="Antes de excluir por estado"
         )
         self.kpi_included = MetricCard(
-            "Citas que se usarán", hint="Según agenda, estado y período", accent=True
+            "Citas incluidas", hint="Según agenda, estado y período", accent=True
         )
         self.kpi_excluded = MetricCard(
             "Excluidas por estado", hint="Canceladas, no presentadas, etc."
@@ -93,11 +93,11 @@ class DashboardScreen(QWidget):
         self._included_states.setWordWrap(True)
         self._included_states.setProperty("role", "faint")
 
-        coverage = Card()
-        coverage.body.addWidget(SectionHeader("La app completará", hint="Sólo los campos automatizados de estas hojas."))
+        self._coverage_card = Card()
+        self._coverage_card.body.addWidget(SectionHeader("La app completará", hint="Sólo los campos automatizados de estas hojas."))
         self._coverage_list = QVBoxLayout()
-        coverage.body.addLayout(self._coverage_list)
-        coverage.body.addWidget(_wrapped(
+        self._coverage_card.body.addLayout(self._coverage_list)
+        self._coverage_card.body.addWidget(_wrapped(
             "Usa la plantilla oficial en blanco. El resto de sus campos no se completa "
             "automáticamente. Las fórmulas y macros se conservan.", faint=True
         ))
@@ -114,7 +114,7 @@ class DashboardScreen(QWidget):
         ))
         preparation = QHBoxLayout()
         preparation.setSpacing(THEME.gap)
-        preparation.addWidget(coverage, stretch=1)
+        preparation.addWidget(self._coverage_card, stretch=1)
         preparation.addWidget(self._pending_card, stretch=1)
 
         # --- gráficos ---
@@ -215,6 +215,7 @@ class DashboardScreen(QWidget):
             "Corrige los registros inválidos de Medinet antes de preparar el borrador."
             if s.validation_blocked else _DISCLAIMER
         )
+        self._coverage_card.setVisible(not s.validation_blocked)
         self.kpi_period.set_hint(
             "Ambulatorias, antes de excluir por estado"
             if s.agenda_filter_applied else "Agenda no informada; antes de excluir por estado"

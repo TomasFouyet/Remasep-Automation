@@ -352,6 +352,7 @@ def test_dashboard_distinguishes_cells_from_citas_and_keeps_charts_optional(wind
     assert "Esta pantalla no confirma" in text
     assert "Generar borrador" in db.generate_button.text()
     assert db.generate_button.isEnabled()
+    assert db._coverage_card.isVisible()
     assert db._charts_container.isHidden()
     db.details_button.click()
     assert not db._charts_container.isHidden()

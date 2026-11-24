@@ -190,7 +190,7 @@ def test_report_content_has_period_kpis_and_footer(summary):
     assert "Borrador parcial" in content.disclaimer
     assert "CONTROL" in content.disclaimer
     joined = " ".join(texts)
-    for label in ("Citas revisadas", "Citas que se usarán",
+    for label in ("Citas revisadas", "Citas incluidas",
                   "Excluidas por estado", "Celdas previstas"):
         assert label in joined
     assert str(summary.period_scope_records) in joined

@@ -15,6 +15,7 @@ from remasep.services.production_pipeline import (
     build_production_pending_writes,
 )
 from remasep.ui.main_window import MainWindow
+from remasep.ui.pdf_report import report_content
 from remasep.ui.workers import run_generation
 
 PERIOD = Period(7, 2026)
@@ -62,6 +63,10 @@ def test_same_period_invalid_record_is_visible_and_blocks_before_writer(
     assert summary.invalid_records == 1
     assert summary.validation_blocked is True
     assert summary.problem_counts == ((expected_code, 1),)
+    report = report_content(summary)
+    planned = next(kpi for kpi in report.kpis if kpi.label == "Celdas previstas")
+    assert planned.value == "—"
+    assert "Generación bloqueada" in report.disclaimer
 
     # El diagnóstico serializable/repr sólo contiene agregados, nunca valores de fila.
     diagnostic_blob = json.dumps(summary.as_dict(), ensure_ascii=False) + repr(summary)
@@ -151,6 +156,7 @@ def test_dashboard_shows_invalid_diagnostic_and_disables_generation(
         assert "Ningún registro inválido fue contado" in dashboard._validation_warning.text()
         assert dashboard.generate_button.isEnabled() is False
         assert dashboard.kpi_writes._value.text() == "—"
+        assert not dashboard._coverage_card.isVisible()
         assert "Corrige los registros inválidos" in dashboard._readiness.text()
     finally:
         window.close()
