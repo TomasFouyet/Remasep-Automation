@@ -329,8 +329,32 @@ def test_dashboard_declares_medinet_source_and_disclaimer(window, medinet_file, 
 
     text = _all_label_text(window.screens["dashboard"])
     assert "MEDINET" in text.upper()
-    assert "no representa todavía la totalidad" in text
+    assert "BORRADOR PARCIAL" in text
+    assert "CONTROL" in text
+    assert "pueblos originarios" in text
+    assert "Sección A" in text
     assert "Tabla quirúrgica" in text  # card "Pendientes de otras fuentes"
+
+
+def test_dashboard_distinguishes_cells_from_citas_and_keeps_charts_optional(window, medinet_file):
+    from remasep.services.common import Period
+    from remasep.services.medinet_summary import build_monthly_medinet_summary
+
+    window.state.summary = build_monthly_medinet_summary(medinet_file, Period(7, 2026))
+    window.navigate("dashboard")
+    db = window.screens["dashboard"]
+    assert db.kpi_writes._value.text() == "1.207"
+    assert db.kpi_included._value.text() == "24"
+    text = _all_label_text(db)
+    assert "REMASEP 01: 242 celdas previstas" in text
+    assert "REMASEP_OD: 952 celdas previstas" in text
+    assert "B2 ANEXO: 13 celdas previstas" in text
+    assert "Esta pantalla no confirma" in text
+    assert "Generar borrador" in db.generate_button.text()
+    assert db.generate_button.isEnabled()
+    assert db._charts_container.isHidden()
+    db.details_button.click()
+    assert not db._charts_container.isHidden()
 
 
 def test_dashboard_without_summary_returns_to_new_report(window):

@@ -150,5 +150,7 @@ def test_dashboard_shows_invalid_diagnostic_and_disables_generation(
         assert "1 registro inválido" in dashboard._validation_warning.text()
         assert "Ningún registro inválido fue contado" in dashboard._validation_warning.text()
         assert dashboard.generate_button.isEnabled() is False
+        assert dashboard.kpi_writes._value.text() == "—"
+        assert "Corrige los registros inválidos" in dashboard._readiness.text()
     finally:
         window.close()

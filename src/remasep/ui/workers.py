@@ -36,7 +36,7 @@ from remasep.ui.operation_lifecycle import OperationSnapshot
 ANALYSIS_STEPS: tuple[str, ...] = (
     "Leyendo el archivo de Medinet…",
     "Validando el período…",
-    "Aplicando los estados confirmados…",
+    "Aplicando los estados incluidos para REMASEP…",
     "Calculando las métricas del mes…",
     "Preparando el resumen…",
 )

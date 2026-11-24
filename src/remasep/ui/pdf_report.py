@@ -25,8 +25,8 @@ from remasep.ui.styles import THEME, format_int
 _FOOTER_APP = "Generado por REMASEP Automation"
 _FOOTER_SOURCE = "Fuente: Medinet"
 _DISCLAIMER = (
-    "Este resumen corresponde únicamente a datos provenientes de Medinet y no "
-    "representa todavía la totalidad del informe REMASEP."
+    "Borrador parcial. Completar portada y datos complementarios; "
+    "revisar CONTROL en Excel antes del envío."
 )
 
 
@@ -84,17 +84,17 @@ def _series_bars(items) -> tuple[Bar, ...]:
 def report_content(s: MonthlyMedinetSummary) -> ReportContent:
     return ReportContent(
         title="REMASEP",
-        subtitle="Resumen mensual · Fuente: Medinet",
+        subtitle="Estadísticas Medinet · Preparación del borrador",
         period=s.period_label,
         kpis=(
-            _Kpi("Citas del período", format_int(s.period_scope_records),
-                 "Válidas e inválidas detectadas"),
-            _Kpi("Consideradas para REMASEP", format_int(s.included_records),
-                 "Sólo estados confirmados"),
+            _Kpi("Citas revisadas", format_int(s.period_scope_records),
+                 "Antes de excluir por estado"),
+            _Kpi("Citas que se usarán", format_int(s.included_records),
+                 "Según agenda, estado y período"),
             _Kpi("Excluidas por estado", format_int(s.excluded_records),
                  "Canceladas, no presentadas, etc."),
-            _Kpi("Porcentaje considerado", f"{s.included_percentage:g}%",
-                 s.considered_ratio_label),
+            _Kpi("Celdas previstas", format_int(s.planned_write_count) if s.planned_write_count else "—",
+                 f"En {len(s.write_targets_by_sheet)} hojas; no son citas"),
         ),
         charts=(
             _ChartSpec(

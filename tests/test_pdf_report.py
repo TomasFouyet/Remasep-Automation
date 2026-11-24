@@ -187,10 +187,11 @@ def test_report_content_has_period_kpis_and_footer(summary):
     assert content.title == "REMASEP"
     assert "Fuente: Medinet" in content.footer_left
     assert "REMASEP Automation" in content.footer_right
-    assert "no representa todavía la totalidad" in content.disclaimer
+    assert "Borrador parcial" in content.disclaimer
+    assert "CONTROL" in content.disclaimer
     joined = " ".join(texts)
-    for label in ("Citas del período", "Consideradas para REMASEP",
-                  "Excluidas por estado", "Porcentaje considerado"):
+    for label in ("Citas revisadas", "Citas que se usarán",
+                  "Excluidas por estado", "Celdas previstas"):
         assert label in joined
     assert str(summary.period_scope_records) in joined
     assert str(summary.included_records) in joined

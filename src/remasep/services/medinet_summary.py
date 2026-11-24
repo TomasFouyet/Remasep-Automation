@@ -47,6 +47,13 @@ PENDING_SOURCES: tuple[str, ...] = (
     "Recursos / capacidad de pabellón",
 )
 
+MANUAL_REVIEW: tuple[str, ...] = (
+    "Portada: códigos SEREMI, establecimiento, comuna y mes.",
+    "Datos complementarios: pueblos originarios, migrantes y embarazadas.",
+    "Consultas resueltas por vía no presencial: confirmar los conteos.",
+    "Control de Salud (Sección A): confirmar qué atenciones corresponden.",
+)
+
 
 @dataclass(frozen=True)
 class CategoryCount:
@@ -84,6 +91,14 @@ class MonthlyMedinetSummary:
     generated_at: str
     pending_sources: tuple[str, ...] = field(default_factory=lambda: PENDING_SOURCES)
     source: str = "Medinet"
+    dated_period_records: int | None = None
+    agenda_excluded_records: int = 0
+    agenda_filter_applied: bool = False
+    write_targets_by_sheet: tuple[CategoryCount, ...] = ()
+
+    @property
+    def planned_write_count(self) -> int:
+        return sum(item.count for item in self.write_targets_by_sheet)
 
     @property
     def validation_blocked(self) -> bool:
@@ -137,6 +152,14 @@ class MonthlyMedinetSummary:
             ],
             "pending_sources": list(self.pending_sources),
             "generated_at": self.generated_at,
+            "dated_period_records": self.dated_period_records,
+            "agenda_excluded_records": self.agenda_excluded_records,
+            "agenda_filter_applied": self.agenda_filter_applied,
+            "planned_write_count": self.planned_write_count,
+            "write_targets_by_sheet": [
+                {"sheet": item.label, "cells": item.count}
+                for item in self.write_targets_by_sheet
+            ],
         }
 
 
@@ -223,4 +246,13 @@ def build_monthly_medinet_summary(
         estado_excluded_states=tuple(bundle.estado_filter.excluded_states),
         estado_filter_status=bundle.estado_filter.status,
         generated_at=datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        dated_period_records=selection.dated_period_records,
+        agenda_excluded_records=selection.agenda_excluded_records,
+        agenda_filter_applied=selection.agenda_filter_applied,
+        write_targets_by_sheet=tuple(
+            CategoryCount(sheet, count)
+            for sheet, count in sorted(Counter(
+                item.target_sheet for item in bundle.write_instructions
+            ).items())
+        ),
     )

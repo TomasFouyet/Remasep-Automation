@@ -177,6 +177,7 @@ class _ScopeSelection:
 
     structural_empty: pd.Series
     active: pd.Series
+    eligible: pd.Series
     dia_bad: pd.Series
     fnac_present_bad: pd.Series
     sexo_empty: pd.Series
@@ -210,6 +211,9 @@ class PeriodSelectionResult:
     unassigned_records: int
     problem_counts: tuple[tuple[str, int], ...]
     frame: pd.DataFrame = field(repr=False, compare=False)
+    dated_period_records: int = 0
+    agenda_excluded_records: int = 0
+    agenda_filter_applied: bool = False
 
     @property
     def blocks_generation(self) -> bool:
@@ -253,6 +257,7 @@ def _scope_selection(medinet: MedinetFrame, period: Period) -> _ScopeSelection:
     return _ScopeSelection(
         structural_empty=structural_empty,
         active=active,
+        eligible=eligible,
         dia_bad=dia_bad,
         fnac_present_bad=fnac_present_bad,
         sexo_empty=sexo_empty,
@@ -328,6 +333,11 @@ def select_period_records(
         unassigned_records=int(unassigned.sum()),
         problem_counts=problem_counts,
         frame=valid_frame,
+        dated_period_records=int((selection.active & dated_in_period).sum()),
+        agenda_excluded_records=int(
+            (selection.active & dated_in_period & ~selection.eligible).sum()
+        ),
+        agenda_filter_applied="TIPO_DE_AGENDA" in medinet.frame,
     )
 
 
