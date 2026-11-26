@@ -36,6 +36,16 @@ def age_terms(lo: int, hi: int | None) -> tuple[tuple[str, str], ...]:
     return (("AF", f">={lo}"),) + ((("AF", f"<={hi}"),) if hi is not None else ())
 
 
+def specialty_count(row: int, types: tuple[str, ...], extra=()) -> str:
+    formula = count(types, extra)
+    if row == 89:
+        # Gantz confirmed inclusion of otorhinolaryngology postoperative
+        # controls as consultations. Other specialties and exams stay out.
+        formula += "+" + countifs((("M", "Otorrinolaringología"),
+                                   ("O", "CONTROL POST OPERATORIO")) + extra)
+    return formula
+
+
 def column_name(number: int) -> str:
     name = ""
     while number:
@@ -56,9 +66,9 @@ def planned() -> list[tuple[str, str, str]]:
     bands_b = tuple((lo, lo + 4) for lo in range(0, 80, 5)) + ((80, None),)
     for row, types in SPECIALTIES.items():
         for column, band in zip("DEFGHIJKLMNOPQRST", bands_b, strict=True):
-            rows.append(("REMASEP 01", f"{column}{row}", count(types, age_terms(*band))))
+            rows.append(("REMASEP 01", f"{column}{row}", specialty_count(row, types, age_terms(*band))))
         for column, sex in (("U", "Hombre"), ("V", "Mujer")):
-            rows.append(("REMASEP 01", f"{column}{row}", count(types, (("H", sex),))))
+            rows.append(("REMASEP 01", f"{column}{row}", specialty_count(row, types, (("H", sex),))))
     for row, code in ((1251, "1301003"), (1255, "1301021"),
                       (1256, "1301008"), (1258, "1301009"),
                       (1267, "1301045"), (1303, "1303010")):
@@ -104,10 +114,13 @@ def main() -> None:
         assert (sheet, cell) not in old_targets, (sheet, cell)
         metric_id = f"MEDINET::2026::{sheet.replace(' ', '_')}::{cell}"
         instruction_id = f"medinet:2026:{sheet.replace(' ', '_')}:{cell}"
-        signature = (
-            f"{sheet} :: EDUCACION SALUD BUCAL :: CODIGO 5010012 :: {cell}"
-            if sheet == "REMASEP_OD" else f"{sheet} :: MEDINET DIRECT :: {cell}"
-        )
+        otor = sheet == "REMASEP 01" and cell.endswith("89")
+        if sheet == "REMASEP_OD":
+            signature = f"{sheet} :: EDUCACION SALUD BUCAL :: CODIGO 5010012 :: {cell}"
+        elif otor:
+            signature = f"{sheet} :: OTORRINO CONSULTA Y CONTROL POST OPERATORIO :: {cell}"
+        else:
+            signature = f"{sheet} :: MEDINET DIRECT :: {cell}"
         # Virtual namespace prevents new base metrics from shadowing the
         # frozen legacy coordinates used by other metrics' dependencies.
         source_sheet = "MEDINET_DIRECT_REMASEP_OD" if sheet == "REMASEP_OD" else sheet
@@ -117,7 +130,7 @@ def main() -> None:
                              source_semantic_signature=signature, target_sheet=sheet,
                              target_cell=cell, target_semantic_signature=signature,
                              expected_value_type="INTEGER_COUNT", template_fingerprint_id=FP,
-                             policy_version="gantz_feedback_20261126" if sheet == "REMASEP_OD" else "medinet_direct_2026.v1",
+                             policy_version="gantz_feedback_20261126" if sheet == "REMASEP_OD" or otor else "medinet_direct_2026.v1",
                              match_status="EXACT_SEMANTIC_MATCH"))
     for path, fields, data, marker in (
         (manifest_path, manifest_fields, manifest, b"medinet:2026:"),

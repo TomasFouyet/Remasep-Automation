@@ -59,3 +59,27 @@ def test_oral_hygiene_education_uses_confirmed_code_once_per_eligible_cita(make_
                   if w.target_sheet == "REMASEP_OD" and w.source_metric_id.startswith("MEDINET::2026::")]
     assert len(additional) == 34
     assert sum(w.value for w in additional) == 2
+
+
+def test_otor_consultations_include_only_otor_postoperative_controls(make_medinet):
+    def row(kind, specialty="Otorrinolaringología", *, state="Atendido", month=10):
+        return [date(2026, month, 15), date(2014, 1, 1), "Hombre", "Santiago",
+                specialty, kind, "", state, "Fonasa A", ""]
+
+    rows = [
+        row("CONSULTA MEDICA DE ESPECIALIDAD EN OTORRINOLARINGOLOGIA - COD.0101205"),
+        row("CONTROL POST OPERATORIO"),
+        row("CONTROL POST OPERATORIO", specialty="Cirugía"),
+        row("IMPEDANCIOMETRÍA - COD.1301009"),
+        row("CONTROL POST OPERATORIO", state="Cancelado"),
+        row("CONTROL POST OPERATORIO", month=9),
+    ]
+    result = build_production_pending_writes(make_medinet(rows), Period(10, 2026))
+    values = {(w.target_sheet, w.target_cell): w.value for w in result.pending_writes}
+    assert result.completeness.ok and len(values) == 1241
+    assert values["REMASEP 01", "F89"] == 2  # Hombre, 10–14 años
+    assert values["REMASEP 01", "U89"] == 2
+    assert values["REMASEP 01", "V89"] == 0
+    assert sum(values["REMASEP 01", f"{col}89"] for col in "DEFGHIJKLMNOPQRST") == 2
+    # This confirmation concerns Section B; it does not extend Control de Salud.
+    assert sum(values["REMASEP 01", f"{col}15"] for col in "DEFGHIJK") == 1
