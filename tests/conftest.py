@@ -29,6 +29,27 @@ MEDINET_HEADERS = [
 ]
 
 
+@pytest.fixture
+def legacy_psychology_bundle():
+    """Archived psychology rules for the locked April–July diagnostic goldens.
+
+    Production uses the confirmed consultation + support-meeting rules. This
+    fixture keeps earlier golden assertions testing their original semantics.
+    """
+    from dataclasses import replace
+
+    from remasep.services.runtime_assets import load_runtime_bundle
+
+    bundle = load_runtime_bundle()
+    archived = {"C953": "LEGACY::B2_ANEXO::D11", "C957": "LEGACY::B2_ANEXO::D15"}
+    instructions = [
+        replace(w, source_metric_id=archived[w.target_cell])
+        if w.target_sheet == "B2 ANEXO" and w.target_cell in archived else w
+        for w in bundle.write_instructions
+    ]
+    return replace(bundle, write_instructions=instructions)
+
+
 @pytest.fixture(scope="session")
 def qapp():
     from PySide6.QtWidgets import QApplication

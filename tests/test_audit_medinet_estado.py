@@ -58,13 +58,12 @@ def test_legacy_hypothesis_yields_exactly_1364(result):
     assert h["states_not_covered_by_hypothesis"] == []
 
 
-def test_scope_comparison_impact_is_locked(result):
+def test_scope_comparison_impact_is_locked(result, legacy_psychology_bundle):
     from dataclasses import replace
     from unittest.mock import patch
 
     import audit_medinet_estado as audit
     from remasep.services.common import Period
-    from remasep.services.runtime_assets import load_runtime_bundle
 
     # The live audit covers the expanded contract. The frozen 2026-07 golden
     # numbers below describe only the original cohort, not the 85 additions.
@@ -72,7 +71,7 @@ def test_scope_comparison_impact_is_locked(result):
         full = result["scope_comparison"][key]
         assert full["metric_values"] == full["pending_writes"] == 1241
         assert full["completeness_ok"]
-    bundle = load_runtime_bundle()
+    bundle = legacy_psychology_bundle
     baseline = [w for w in bundle.write_instructions if w.instruction_id.startswith("wi:")]
     assert len(baseline) == 1122
     with patch.object(audit, "load_runtime_bundle", return_value=replace(

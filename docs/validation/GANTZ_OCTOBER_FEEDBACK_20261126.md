@@ -18,9 +18,11 @@ iteración; las observaciones no deben atribuirse sin más al borrador anterior.
 |---|---|---|
 | REMASEP 01 W/X, filas 55, 75 y 89, deben ser cero | Las consultas codificadas de genética (7), plástica (119) y otorrino (8) tienen SUCURSAL=Santiago. No hay telemedicina entre estas consultas. | Cero de octubre respaldado por Gantz. La app sigue sin escribir estos campos; no se impone cero a otros meses ni se inventa el reparto teléfono/otras plataformas. Falta cerrar su regla general. |
 | REMASEP 01 C89 incompleto | 8 consultas tipo COD.0101205 y 7 controles postoperatorios de especialidad otorrino. El usuario confirmó incluir ambas categorías el 26 de noviembre. | **Implementado:** fila 89 incluye la consulta codificada o TIPO_DE_CITA=CONTROL POST OPERATORIO con ESPECIALIDAD=Otorrinolaringología. Octubre pasa de 8 a 15 (9 hombres y 6 mujeres). Se actualizan edades y sexo; C89 sigue siendo fórmula. |
-| B1 otorrino son exámenes, no consultas | `REMASEP B1!C102 = 'B2 ANEXO'!C1247`; resultado guardado 37. | La fórmula ya usa procedimientos diagnósticos, no el total de consultas médicas. Sin cambios. |
+| B1 otorrino son exámenes, no consultas | `REMASEP B1!C102 = 'B2 ANEXO'!C1247`; resultado guardado anterior 37. El usuario confirmó siete tipos de cita del filtro, incluidos dos nasofibroscopías de contingencia y un examen auditivo de contingencia. | Se conserva la fórmula. Las dos nasofibroscopías se incorporan en B2 C1251 y el total vinculado esperado pasa a 39. El examen auditivo genérico restante no tiene PRESTACION ni PRESTACION_REALIZADA: falta identificar su examen/código para distribuirlo en B2 y llegar a 40 sin duplicar. |
 | B1 kinesiología sí corresponde | `REMASEP B1!C112 = 'B2 ANEXO'!C830`; resultado 32. | Sin cambios. |
-| URGENCIAS y B2 ANEXO aprobados | Confirmación funcional de Gantz. | Se mantienen reglas y fórmulas. |
+| URGENCIAS y B2 ANEXO inicialmente aprobados | Confirmación funcional inicial de Gantz; luego el usuario precisó psicología y contingencias de nasofibroscopía. | URGENCIAS sin cambios; se incorporan únicamente las precisiones confirmadas de B2 descritas abajo. |
+| B2 ANEXO C953 / C957, psicología | El usuario confirmó incluir REUNIÓN APOYO, manteniendo Santiago y Telemedicina separados. Octubre contiene 37 consultas + 3 reuniones en Santiago y 2 consultas + 3 reuniones en Telemedicina. | **Implementado:** C953=40 y C957=5. Las reuniones requieren ESPECIALIDAD=Psicología y la sucursal correspondiente. No se trasladan reuniones entre bloques. |
+| B2 ANEXO C1251, NASOFARINGOLARINGOFIBROSCOPIA | El usuario confirmó incluir ATENCION DE CONTINGENCIA NASOFARINGOLARINGOFIBROSCOPIA además de las prestaciones codificadas 1301003. Octubre contiene 8 codificadas y 2 contingencias sin solapamiento. | **Implementado:** C1251 pasa de 8 a 10. La regla cuenta la unión de ambos criterios; una cita con código y tipo contingencia cuenta una sola vez. |
 | OD 58, instrucción de higiene oral, código 5010012 | La fila oficial se llama Educación en salud bucal y no estaba en el manifiesto. El código aparece en agosto/septiembre, pero no en octubre del export disponible, antes o después del filtro. | **Implementado:** 34 destinos por edad/sexo basados en el código 5010012 de PRESTACION. Una cita cuenta una vez aunque el código se repita. En este input: septiembre=1, octubre=0. Si Gantz esperaba un positivo en octubre hay que conciliar el export efectivamente usado. |
 | OD 59, terceros molares | La fila no estaba en el manifiesto. En octubre hay 4 citas incluidas con 5003001 EXODONCIA y 1 con 5003002 EXODONCIA COLGAJO. Ninguna identifica tercer molar. No hay columna estructurada de pieza/diente en el export. | No se convierten todas las exodoncias en terceros molares. Se requiere código o pieza y definición de unidad de conteo. |
 | OD 65, aparato removible | Las 3 citas con 5003017 INSTALACIÓN CONTENCION REMOVIBLE ya cuentan en fila 67, Instalación aparato de contención ortodóncico. La fila 65 es Instalación aparato removible ortodóncico. Una cita repite el código, sin evidencia de si representa 2 dispositivos o duplicación. | No se trasladan ni duplican esas 3 citas. Confirmar código de aparato, destino clínico y unidad de conteo. |
@@ -51,17 +53,59 @@ octubre de 8 a 15. No se amplía por esta confirmación la Sección A (Control d
 Salud), ni se incluyen exámenes, postoperatorios de otra especialidad o citas
 de estados excluidos.
 
-Validación Linux: **987 aprobadas, 12 omitidas, 4 pruebas Excel excluidas**.
+La tercera corrección incorpora las dos reglas de psicología y amplía C1251.
+El contrato se mantiene en **1.241 destinos únicos**. Las dos fórmulas legacy
+originales de psicología permanecen archivadas en el catálogo; los destinos
+existentes apuntan a métricas Medinet versionadas, en un namespace virtual.
+Los tests históricos mantienen sus números originales mediante un bundle
+exclusivamente diagnóstico con esas dos reglas archivadas. Los tests de
+producción usan las reglas vigentes y verifican la separación de sucursales.
+El regenerador de assets es idempotente y conserva el resto del baseline.
+
+Comparación antes/después sobre el export directo disponible:
+
+| Mes | C953 psicología Santiago | C957 psicología Telemedicina | C1251 nasofibroscopía | Otros destinos |
+|---|---:|---:|---:|---|
+| Septiembre | Sin cambio | 4 → 9 | 14, sin cambio | Sin cambio |
+| Octubre | 37 → 40 | 2 → 5 | 8 → 10 | Sin cambio |
+
+Ambos meses producen 1.241 PendingWrites y completeness.ok=true. Se verificó
+independientemente la unión de las citas codificadas y de contingencia desde
+las columnas del export. Se conservaron los SHA256 de los 18 archivos Excel
+originales disponibles durante el cálculo. Los digests actuales, serializando
+`[[sheet,cell,value],...]` ordenado por destino con JSON UTF-8 compacto y
+`ensure_ascii=False`, son:
+
+- Septiembre: `3cfc7df015588a0ffc8cbe9c5d5915f7f3983d6a4a154ea7980edb71f449238d`.
+- Octubre: `e213e94531caf026c52498368a286ba69a2db93c0e66dbc0cf153d2e44965b79`.
+
+Validación Linux: **990 aprobadas, 12 omitidas, 4 pruebas Excel excluidas**.
+Una ejecución adicional con el export original de julio, su generador de
+referencia y el REMASEP histórico de julio completó **14 pruebas aprobadas**,
+incluidas las seis regresiones de la extensión. Conservó los números golden
+del contrato archivado y contrastó la producción vigente con la auditoría.
 Incluye regresión sintética para código dentro de una lista, código repetido,
-filtro ESTADO y bandas de edad/sexo. Septiembre y octubre producen 1.241
-destinos únicos y completeness.ok=true. No se ejecutó Excel COM ni se compiló
+filtro ESTADO, bandas de edad/sexo, sucursal/especialidad en reuniones de
+psicología y doble criterio sin duplicación en nasofibroscopía.
+No se ejecutó Excel COM ni se compiló
 un EXE nuevo en este entorno. El conteo positivo de OD58 también puede exigir
 completar sus campos complementarios en CONTROL; no se rellenan por defecto.
+
+Comandos de verificación (con dependencias instaladas y PYTHONPATH=src):
+
+```bash
+python scripts/extend_medinet_scope_2026.py
+python -m pytest -q -m 'not excel' --disable-warnings --maxfail=2
+python -m pytest -q tests/test_medinet_scope_extension.py
+```
 
 ## Información necesaria para cerrar los pendientes
 
 Confirmar si el input usado para el archivo enviado es el mismo identificado
 arriba y los valores/códigos que identifican las dos categorías de prótesis.
 La inclusión de los siete postoperatorios de C89 ya está confirmada e implementada.
+También están confirmadas e implementadas las reuniones de psicología por
+sucursal y las nasofibroscopías de contingencia. Para conciliar B1 otorrino a
+40 falta identificar el examen de la cita genérica de contingencia auditiva.
 Para terceros molares y aparatos se necesita el código/pieza/unidad de
 conteo que utiliza Gantz. Estas decisiones no se deducen del match histórico.

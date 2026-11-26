@@ -234,7 +234,7 @@ _local_available = _MEDINET_REAL.is_file()
 
 
 @pytest.mark.skipif(not _local_available, reason="requiere data/local de desarrollo")
-def test_july_2026_production_scope_and_metrics_match_audit():
+def test_july_2026_production_scope_and_metrics_match_audit(legacy_psychology_bundle):
     result = build_production_pending_writes(_MEDINET_REAL, Period(7, 2026))
     s = result.scope
     assert s.period_scope_records == 2114
@@ -244,7 +244,8 @@ def test_july_2026_production_scope_and_metrics_match_audit():
     assert s.estado_filter_applied is True
 
     mv = result.run.metric_values
-    baseline = [x for x in mv if x.source_metric_id.startswith("LEGACY::")]
+    archived = build_production_pending_writes(_MEDINET_REAL, Period(7, 2026), bundle=legacy_psychology_bundle)
+    baseline = [x for x in archived.run.metric_values if x.source_metric_id.startswith("LEGACY::")]
     assert len(mv) == 1241 and len(baseline) == 1122
     assert len(result.pending_writes) == 1241
     assert sum(1 for x in baseline if x.value) == 187
@@ -258,7 +259,7 @@ def test_july_2026_production_scope_and_metrics_match_audit():
     not (_LEGACY.is_file() and _MEDINET_REAL.is_file()),
     reason="requiere data/local de desarrollo",
 )
-def test_production_is_exactly_the_phase1_legacy_state_hypothesis():
+def test_production_is_exactly_the_phase1_legacy_state_hypothesis(legacy_psychology_bundle):
     """Equivalencia exacta: producción (filtro ESTADO) == escenario B de la
     auditoría (`LEGACY_STATE_HYPOTHESIS`), métrica por métrica."""
     import sys
@@ -266,9 +267,9 @@ def test_production_is_exactly_the_phase1_legacy_state_hypothesis():
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
     import audit_medinet_estado as audit  # type: ignore[import-not-found]
     from build_metric_values import (  # type: ignore[import-not-found]
+        ManifestRow,
         _diagnostic_frame,
         build_legacy_reference,
-        load_manifest,
         run_producer,
     )
 
@@ -283,9 +284,12 @@ def test_production_is_exactly_the_phase1_legacy_state_hypothesis():
 
     # B) OLD (workbook legacy) filtrado a los estados confirmados
     reference = build_legacy_reference(_LEGACY)
-    old_manifest = load_manifest(
-        Path("artifacts/writable_target_mapping/write_manifest_ready.csv")
-    )
+    from dataclasses import asdict
+
+    # Use the versioned baseline mapping; no untracked generated artifact is
+    # needed to compare the archived rules against the independent workbook.
+    old_manifest = [ManifestRow(asdict(w)) for w in legacy_psychology_bundle.write_instructions
+                    if w.instruction_id.startswith("wi:")]
     old_frame = _diagnostic_frame(
         processing_scope_frame(_MEDINET_REAL, period), _CONFIRMED_INCLUDED
     )
@@ -298,8 +302,9 @@ def test_production_is_exactly_the_phase1_legacy_state_hypothesis():
     new = build_production_pending_writes(_MEDINET_REAL, period)
 
     assert new.scope.processing_scope_records == audit_b["scope_records"] == 1364
-    baseline_mv = [x for x in new.run.metric_values if x.source_metric_id.startswith("LEGACY::")]
-    baseline_pending = [x for x in new.pending_writes if x.instruction_id.startswith("wi:")]
+    archived = build_production_pending_writes(_MEDINET_REAL, period, bundle=legacy_psychology_bundle)
+    baseline_mv = [x for x in archived.run.metric_values if x.source_metric_id.startswith("LEGACY::")]
+    baseline_pending = [x for x in archived.pending_writes if x.instruction_id.startswith("wi:")]
     assert len(new.run.metric_values) == len(new.pending_writes) == 1241
     assert len(new.run.metric_values) == audit_b["metric_values"] == 1241
     assert len(new.pending_writes) == audit_b["pending_writes"] == 1241

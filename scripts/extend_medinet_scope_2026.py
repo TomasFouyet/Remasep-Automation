@@ -21,6 +21,12 @@ SPECIALTIES = {
     75: ("CONSULTA MEDICA DE ESPECIALIDAD EN CIRUGIA PLASTICA Y REPARADORA*",),
     89: ("CONSULTA MEDICA DE ESPECIALIDAD EN OTORRINOLARINGOLOGIA*",),
 }
+# Keep the archived legacy formulas available for diagnostic comparisons;
+# redirect only these existing writable destinations to confirmed new rules.
+OVERRIDES = {
+    ("B2 ANEXO", "C953"): "LEGACY::B2_ANEXO::D11",
+    ("B2 ANEXO", "C957"): "LEGACY::B2_ANEXO::D15",
+}
 
 
 def countifs(criteria: tuple[tuple[str, str], ...]) -> str:
@@ -73,12 +79,26 @@ def planned() -> list[tuple[str, str, str]]:
                       (1256, "1301008"), (1258, "1301009"),
                       (1267, "1301045"), (1303, "1303010")):
         # Code prefix in PRESTACION avoids spelling and encoding variations.
-        rows.append(("B2 ANEXO", f"C{row}", "=" + countifs((("AA", code + "*"),))))
+        formula = "=" + countifs((("AA", code + "*"),))
+        if row == 1251:
+            # A contingency can already carry the code: count that appointment
+            # only once, while retaining the original coded-service criterion.
+            formula += "+" + countifs((
+                ("O", "ATENCION DE CONTINGENCIA NASOFARINGOLARINGOFIBROSCOPIA"),
+                ("AA", "<>" + code + "*"),
+            ))
+        rows.append(("B2 ANEXO", f"C{row}", formula))
     coded = "REHABILITACIÓN INTEGRAL DE FONOAUDIÓLOGO - COD.1303011"
     rows.append(("B2 ANEXO", "C1304", count((coded,
         "REHABILITACIÓN FONOAUDIOLOGÍA PRESENCIAL CON GRATUIDAD"), (("K", "Santiago"),))))
     rows.append(("B2 ANEXO", "C1307", count((coded,
         "REHABILITACIÓN FONOAUDIOLOGÍA TELEMEDICINA CON GRATUIDAD"), (("K", "Telemedicina"),))))
+    consultation = "CONSULTA PSICOLOGO CLINICO (SESIONES 45') - COD.0902001"
+    for cell, branch in (("C953", "Santiago"), ("C957", "Telemedicina")):
+        formula = count((consultation,), (("K", branch),))
+        formula += "+" + countifs((("O", "REUNIÓN APOYO"), ("K", branch),
+                                   ("M", "Psicología")))
+        rows.append(("B2 ANEXO", cell, formula))
     # Gantz feedback (2026-11-26): OD row 58 is instruction in oral hygiene,
     # service code 5010012. Count each eligible appointment once, including
     # when the service appears in a comma-separated list of procedures.
@@ -90,7 +110,7 @@ def planned() -> list[tuple[str, str, str]]:
             criteria = (("AA", "*5010012 -*"), ("H", sex)) + age_terms(*band)
             rows.append(("REMASEP_OD", f"{column_name(5 + index * 2 + offset)}58",
                          "=" + countifs(criteria)))
-    assert len(rows) == 119
+    assert len(rows) == 121
     return rows
 
 
@@ -109,37 +129,61 @@ def main() -> None:
     # Idempotence: repeat generation updates its own rows without touching baseline.
     manifest = [r for r in manifest if not r["instruction_id"].startswith("medinet:2026:")]
     catalog = [r for r in catalog if not r["metric_id"].startswith("MEDINET::2026::")]
-    old_targets = {(r["target_sheet"], r["target_cell"]) for r in manifest}
+    old_targets = {(r["target_sheet"], r["target_cell"]): r for r in manifest}
+    replacements = {}
     for sheet, cell, formula in planned():
-        assert (sheet, cell) not in old_targets, (sheet, cell)
+        target = (sheet, cell)
+        assert target not in old_targets or target in OVERRIDES, target
         metric_id = f"MEDINET::2026::{sheet.replace(' ', '_')}::{cell}"
         instruction_id = f"medinet:2026:{sheet.replace(' ', '_')}:{cell}"
         otor = sheet == "REMASEP 01" and cell.endswith("89")
+        feedback = sheet == "REMASEP_OD" or otor or target in OVERRIDES or target == ("B2 ANEXO", "C1251")
         if sheet == "REMASEP_OD":
             signature = f"{sheet} :: EDUCACION SALUD BUCAL :: CODIGO 5010012 :: {cell}"
         elif otor:
             signature = f"{sheet} :: OTORRINO CONSULTA Y CONTROL POST OPERATORIO :: {cell}"
+        elif target in OVERRIDES:
+            branch = "Santiago" if cell == "C953" else "Telemedicina"
+            signature = f"{sheet} :: PSICOLOGIA CONSULTA Y REUNION APOYO :: {branch} :: {cell}"
+        elif target == ("B2 ANEXO", "C1251"):
+            signature = f"{sheet} :: NASOFARINGOLARINGOFIBROSCOPIA CODIGO O CONTINGENCIA :: {cell}"
         else:
             signature = f"{sheet} :: MEDINET DIRECT :: {cell}"
         # Virtual namespace prevents new base metrics from shadowing the
         # frozen legacy coordinates used by other metrics' dependencies.
-        source_sheet = "MEDINET_DIRECT_REMASEP_OD" if sheet == "REMASEP_OD" else sheet
+        source_sheet = f"MEDINET_DIRECT_{sheet.replace(' ', '_')}" if sheet == "REMASEP_OD" or target in OVERRIDES else sheet
         catalog.append(dict(metric_id=metric_id, sheet=source_sheet, cell=cell,
                             kind="BASE_AGGREGATION", value_ref_coords="", formula=formula))
+        if target in OVERRIDES:
+            row = old_targets[target]
+            assert row["source_metric_id"] in (OVERRIDES[target], metric_id)
+            row.update(source_metric_id=metric_id, source_semantic_signature=signature,
+                       policy_version="gantz_feedback_20261126")
+            replacements[row["instruction_id"]] = row
+            continue
         manifest.append(dict(instruction_id=instruction_id, source_metric_id=metric_id,
                              source_semantic_signature=signature, target_sheet=sheet,
                              target_cell=cell, target_semantic_signature=signature,
                              expected_value_type="INTEGER_COUNT", template_fingerprint_id=FP,
-                             policy_version="gantz_feedback_20261126" if sheet == "REMASEP_OD" or otor else "medinet_direct_2026.v1",
+                             policy_version="gantz_feedback_20261126" if feedback else "medinet_direct_2026.v1",
                              match_status="EXACT_SEMANTIC_MATCH"))
     for path, fields, data, marker in (
         (manifest_path, manifest_fields, manifest, b"medinet:2026:"),
         (catalog_path, catalog_fields, catalog, b"MEDINET::2026::"),
     ):
-        # Preserve the frozen CRLF baseline byte-for-byte; new rows use LF to
-        # avoid a noisy diff and remain idempotent on repeated generation.
-        baseline = b"".join(line for line in path.read_bytes().splitlines(keepends=True)
-                            if not line.startswith(marker))
+        # Preserve unaffected baseline bytes. Only the two explicitly confirmed
+        # overrides change existing manifest rows; legacy catalog stays frozen.
+        baseline_lines = []
+        for line in path.read_bytes().splitlines(keepends=True):
+            if line.startswith(marker):
+                continue
+            key = line.split(b",", 1)[0].decode("utf-8")
+            if path == manifest_path and key in replacements:
+                buffer = io.StringIO(newline="")
+                csv.DictWriter(buffer, fieldnames=fields, lineterminator="\n").writerow(replacements[key])
+                line = buffer.getvalue().encode("utf-8")
+            baseline_lines.append(line)
+        baseline = b"".join(baseline_lines)
         additions = [row for row in data if (
             row.get("instruction_id", row.get("metric_id", ""))
         ).encode("utf-8").startswith(marker)]
@@ -155,7 +199,7 @@ def main() -> None:
         digest = hashlib.sha256(path.read_bytes()).hexdigest()
         text = re.sub(rf"({re.escape(path.name)}: )[0-9a-f]{{64}}", rf"\g<1>{digest}", text)
     bundle_path.write_text(text, encoding="utf-8")
-    print(f"instructions={len(manifest)} added={len(planned())}")
+    print(f"instructions={len(manifest)} added={len(planned()) - len(OVERRIDES)} overrides={len(OVERRIDES)}")
 
 
 if __name__ == "__main__":

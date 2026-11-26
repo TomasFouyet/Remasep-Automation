@@ -16,8 +16,8 @@ legacy_rules:
   file: rules.yaml
   sha256: f12abf80a783c40dfc106e398ac4ad40ba7a9340a8b5bcf994a672e5c42ee2a3
 assets:
-  write_manifest.csv: ea9473df99e0919ef4fd3f4b18079a3429f2e32cc90aaed973b860d5ee8b9c7f
-  metric_catalog.csv: 13eca9432f9fcabefa76857f5d8a2b65c4b71a707e5dada39b69245707fcd1ed
+  write_manifest.csv: 8541d8b435eb33b20688c3fe8f8a750597f7ee216065660245c31381f1a13eac
+  metric_catalog.csv: 7176742b625d62434069cbdfa8fb1485ae7554ce67ad0be1a3d900573f2ee18a
   detail_contract.yaml: 6f4f2814a224427abb20eb50e908ed647b0e1546295d0a0d17c09c8f305f1640
   zero_policy.yaml: 1b1f65d7783a311c336e3fd306d5bb936718a603dd7b25b953d7fff541ece7eb
   estado_filter.yaml: 3dbae07c83b95acc930422b0ceb56e2dac946af7a0888c27ba1a3ca42f3d406c

@@ -483,8 +483,10 @@ def _baseline_counts(outcome):
 
 
 @pytest.mark.skipif(not _local_available, reason="requiere data/local de desarrollo")
-def test_july_2026_historical_regression_matches_known_numbers():
-    outcomes = chr_script.historical_regression(_MEDINET_REAL, _DATA_LOCAL, months=[7])
+def test_july_2026_historical_regression_matches_known_numbers(legacy_psychology_bundle):
+    outcomes = chr_script.historical_regression(
+        _MEDINET_REAL, _DATA_LOCAL, months=[7], bundle=legacy_psychology_bundle
+    )
     assert len(outcomes) == 1
     outcome = outcomes[0]
     assert outcome.status == "COMPARED"
@@ -503,12 +505,14 @@ def test_july_2026_historical_regression_matches_known_numbers():
     not _local_all_references_available,
     reason="requiere las 4 referencias históricas en data/local",
 )
-def test_april_to_july_2026_historical_regression_matches_known_numbers():
+def test_april_to_july_2026_historical_regression_matches_known_numbers(legacy_psychology_bundle):
     """Con las 4 referencias históricas presentes, ningún mes debe quedar
     BLOCKED ni con UNAVAILABLE espurio: una celda vacía leída con éxito es una
     referencia válida (ZERO_VS_BLANK o REAL_MISMATCH según el calculado), nunca
     REFERENCE_UNAVAILABLE. No se fabrica ninguna coincidencia."""
-    outcomes = chr_script.historical_regression(_MEDINET_REAL, _DATA_LOCAL, months=[4, 5, 6, 7])
+    outcomes = chr_script.historical_regression(
+        _MEDINET_REAL, _DATA_LOCAL, months=[4, 5, 6, 7], bundle=legacy_psychology_bundle
+    )
     assert len(outcomes) == 4
     for outcome in outcomes:
         expected = _KNOWN_MONTH_RESULTS[outcome.month]
