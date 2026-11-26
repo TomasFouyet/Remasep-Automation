@@ -439,7 +439,7 @@ def test_historical_regression_uses_real_pipeline_end_to_end(make_medinet):
     outcomes = chr_script.historical_regression(medinet, "data/local", months=[7])
     assert len(outcomes) == 1
     assert outcomes[0].status == "COMPARED"
-    assert outcomes[0].pending_write_count == 1207
+    assert outcomes[0].pending_write_count == 1241
 
 
 # ---------------------------------------------------------------------------
@@ -492,7 +492,7 @@ def test_july_2026_historical_regression_matches_known_numbers():
     assert outcome.reference.match_kind == "EXACT_NAME_MATCH"
     row = _baseline_counts(outcome)
     expected = _KNOWN_MONTH_RESULTS[7]
-    assert outcome.pending_write_count == 1207
+    assert outcome.pending_write_count == 1241
     assert row["exact_match"] == expected["exact_match"]
     assert row["zero_vs_blank"] == expected["zero_vs_blank"]
     assert row["real_mismatch"] == expected["real_mismatch"]
@@ -515,7 +515,7 @@ def test_april_to_july_2026_historical_regression_matches_known_numbers():
         assert outcome.status == "COMPARED"
         assert outcome.reference.available
         assert outcome.completeness_ok
-        assert outcome.pending_write_count == 1207
+        assert outcome.pending_write_count == 1241
         row = _baseline_counts(outcome)
         assert row["exact_match"] == expected["exact_match"]
         assert row["zero_vs_blank"] == expected["zero_vs_blank"]

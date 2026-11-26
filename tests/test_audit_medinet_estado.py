@@ -70,7 +70,7 @@ def test_scope_comparison_impact_is_locked(result):
     # numbers below describe only the original cohort, not the 85 additions.
     for key in ("A_PERIOD_ONLY", "B_LEGACY_STATE_HYPOTHESIS"):
         full = result["scope_comparison"][key]
-        assert full["metric_values"] == full["pending_writes"] == 1207
+        assert full["metric_values"] == full["pending_writes"] == 1241
         assert full["completeness_ok"]
     bundle = load_runtime_bundle()
     baseline = [w for w in bundle.write_instructions if w.instruction_id.startswith("wi:")]

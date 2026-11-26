@@ -343,11 +343,11 @@ def test_dashboard_distinguishes_cells_from_citas_and_keeps_charts_optional(wind
     window.state.summary = build_monthly_medinet_summary(medinet_file, Period(7, 2026))
     window.navigate("dashboard")
     db = window.screens["dashboard"]
-    assert db.kpi_writes._value.text() == "1.207"
+    assert db.kpi_writes._value.text() == "1.241"
     assert db.kpi_included._value.text() == "24"
     text = _all_label_text(db)
     assert "REMASEP 01: 242 celdas previstas" in text
-    assert "REMASEP_OD: 952 celdas previstas" in text
+    assert "REMASEP_OD: 986 celdas previstas" in text
     assert "B2 ANEXO: 13 celdas previstas" in text
     assert "Esta pantalla no confirma" in text
     assert "Generar borrador" in db.generate_button.text()

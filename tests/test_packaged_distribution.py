@@ -59,7 +59,7 @@ def _make_medinet(path: Path) -> None:
     wb.save(path)
 
 
-def test_isolated_distribution_resolves_all_assets_and_calculates_1207(tmp_path):
+def test_isolated_distribution_resolves_all_assets_and_calculates_1241(tmp_path):
     dist = tmp_path / "dist" / "REMASEP"
     internal = dist / "_internal"
     shutil.copytree(ROOT / "src" / "remasep", internal / "remasep")
@@ -119,7 +119,7 @@ def test_isolated_distribution_resolves_all_assets_and_calculates_1207(tmp_path)
     assert completed.returncode == 0, completed.stderr
     assert "SMOKE OK" in completed.stdout
     assert result_file.read_text(encoding="utf-8") == (
-        "1207|True|6|excel_writer_2026|CONTROL"
+        "1241|True|6|excel_writer_2026|CONTROL"
     )
 
 

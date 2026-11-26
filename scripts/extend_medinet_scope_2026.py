@@ -36,6 +36,14 @@ def age_terms(lo: int, hi: int | None) -> tuple[tuple[str, str], ...]:
     return (("AF", f">={lo}"),) + ((("AF", f"<={hi}"),) if hi is not None else ())
 
 
+def column_name(number: int) -> str:
+    name = ""
+    while number:
+        number, remainder = divmod(number - 1, 26)
+        name = chr(65 + remainder) + name
+    return name
+
+
 def planned() -> list[tuple[str, str, str]]:
     rows: list[tuple[str, str, str]] = []
     bands_a = ((0, 9), (10, 14), (15, 19), (20, 24), (25, 39),
@@ -61,7 +69,18 @@ def planned() -> list[tuple[str, str, str]]:
         "REHABILITACIÓN FONOAUDIOLOGÍA PRESENCIAL CON GRATUIDAD"), (("K", "Santiago"),))))
     rows.append(("B2 ANEXO", "C1307", count((coded,
         "REHABILITACIÓN FONOAUDIOLOGÍA TELEMEDICINA CON GRATUIDAD"), (("K", "Telemedicina"),))))
-    assert len(rows) == 85
+    # Gantz feedback (2026-11-26): OD row 58 is instruction in oral hygiene,
+    # service code 5010012. Count each eligible appointment once, including
+    # when the service appears in a comma-separated list of procedures.
+    bands_od = ((0, 1), (2, 3), (4, 4), (5, 5), (6, 6), (7, 7), (8, 8),
+                (9, 9), (10, 14), (15, 19), (20, 24), (25, 34), (35, 44),
+                (45, 59), (60, 64), (65, 74), (75, None))
+    for index, band in enumerate(bands_od):
+        for offset, sex in enumerate(("Hombre", "Mujer")):
+            criteria = (("AA", "*5010012 -*"), ("H", sex)) + age_terms(*band)
+            rows.append(("REMASEP_OD", f"{column_name(5 + index * 2 + offset)}58",
+                         "=" + countifs(criteria)))
+    assert len(rows) == 119
     return rows
 
 
@@ -85,14 +104,21 @@ def main() -> None:
         assert (sheet, cell) not in old_targets, (sheet, cell)
         metric_id = f"MEDINET::2026::{sheet.replace(' ', '_')}::{cell}"
         instruction_id = f"medinet:2026:{sheet.replace(' ', '_')}:{cell}"
-        signature = f"{sheet} :: MEDINET DIRECT :: {cell}"
-        catalog.append(dict(metric_id=metric_id, sheet=sheet, cell=cell,
+        signature = (
+            f"{sheet} :: EDUCACION SALUD BUCAL :: CODIGO 5010012 :: {cell}"
+            if sheet == "REMASEP_OD" else f"{sheet} :: MEDINET DIRECT :: {cell}"
+        )
+        # Virtual namespace prevents new base metrics from shadowing the
+        # frozen legacy coordinates used by other metrics' dependencies.
+        source_sheet = "MEDINET_DIRECT_REMASEP_OD" if sheet == "REMASEP_OD" else sheet
+        catalog.append(dict(metric_id=metric_id, sheet=source_sheet, cell=cell,
                             kind="BASE_AGGREGATION", value_ref_coords="", formula=formula))
         manifest.append(dict(instruction_id=instruction_id, source_metric_id=metric_id,
                              source_semantic_signature=signature, target_sheet=sheet,
                              target_cell=cell, target_semantic_signature=signature,
                              expected_value_type="INTEGER_COUNT", template_fingerprint_id=FP,
-                             policy_version="medinet_direct_2026.v1", match_status="EXACT_SEMANTIC_MATCH"))
+                             policy_version="gantz_feedback_20261126" if sheet == "REMASEP_OD" else "medinet_direct_2026.v1",
+                             match_status="EXACT_SEMANTIC_MATCH"))
     for path, fields, data, marker in (
         (manifest_path, manifest_fields, manifest, b"medinet:2026:"),
         (catalog_path, catalog_fields, catalog, b"MEDINET::2026::"),
@@ -116,7 +142,7 @@ def main() -> None:
         digest = hashlib.sha256(path.read_bytes()).hexdigest()
         text = re.sub(rf"({re.escape(path.name)}: )[0-9a-f]{{64}}", rf"\g<1>{digest}", text)
     bundle_path.write_text(text, encoding="utf-8")
-    print(f"instructions={len(manifest)} new=85")
+    print(f"instructions={len(manifest)} added={len(planned())}")
 
 
 if __name__ == "__main__":

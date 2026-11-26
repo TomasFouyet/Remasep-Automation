@@ -107,9 +107,9 @@ def test_summary_explains_agenda_exclusion_and_manifest_coverage(make_medinet):
     assert s.agenda_excluded_records == 1
     assert s.period_scope_records == 2
     assert (s.included_records, s.excluded_records, s.invalid_records) == (1, 1, 0)
-    assert s.planned_write_count == load_runtime_bundle().expected_instruction_count == 1207
+    assert s.planned_write_count == load_runtime_bundle().expected_instruction_count == 1241
     assert {x.label: x.count for x in s.write_targets_by_sheet} == {
-        "REMASEP 01": 242, "REMASEP_OD": 952, "B2 ANEXO": 13,
+        "REMASEP 01": 242, "REMASEP_OD": 986, "B2 ANEXO": 13,
     }
 
 

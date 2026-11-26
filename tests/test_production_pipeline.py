@@ -139,8 +139,8 @@ def test_production_builds_1122_pending_writes_from_runtime_only(
     assert result.estado_filter_status == "CONFIRMED"
     assert result.scope.estado_filter_applied is True
     assert result.scope.processing_scope_records == 3
-    assert len(result.run.metric_values) == 1207
-    assert len(result.pending_writes) == 1207
+    assert len(result.run.metric_values) == 1241
+    assert len(result.pending_writes) == 1241
     assert result.completeness.ok is True
     assert not result.completeness.missing
     assert not result.completeness.duplicate
@@ -186,7 +186,7 @@ def test_non_ambulatory_rows_are_excluded_before_structural_validation(make_medi
 
     assert result.scope.period_scope_records == 1
     assert result.scope.processing_scope_records == 1
-    assert len(result.pending_writes) == 1207
+    assert len(result.pending_writes) == 1241
     assert result.completeness.ok
 
 
@@ -245,8 +245,8 @@ def test_july_2026_production_scope_and_metrics_match_audit():
 
     mv = result.run.metric_values
     baseline = [x for x in mv if x.source_metric_id.startswith("LEGACY::")]
-    assert len(mv) == 1207 and len(baseline) == 1122
-    assert len(result.pending_writes) == 1207
+    assert len(mv) == 1241 and len(baseline) == 1122
+    assert len(result.pending_writes) == 1241
     assert sum(1 for x in baseline if x.value) == 187
     assert sum(x.value for x in baseline) == 928
     assert result.completeness.ok is True
@@ -300,9 +300,9 @@ def test_production_is_exactly_the_phase1_legacy_state_hypothesis():
     assert new.scope.processing_scope_records == audit_b["scope_records"] == 1364
     baseline_mv = [x for x in new.run.metric_values if x.source_metric_id.startswith("LEGACY::")]
     baseline_pending = [x for x in new.pending_writes if x.instruction_id.startswith("wi:")]
-    assert len(new.run.metric_values) == len(new.pending_writes) == 1207
-    assert len(new.run.metric_values) == audit_b["metric_values"] == 1207
-    assert len(new.pending_writes) == audit_b["pending_writes"] == 1207
+    assert len(new.run.metric_values) == len(new.pending_writes) == 1241
+    assert len(new.run.metric_values) == audit_b["metric_values"] == 1241
+    assert len(new.pending_writes) == audit_b["pending_writes"] == 1241
     assert sum(1 for x in new.run.metric_values if x.value) == audit_b["nonzero_metric_values"]
     assert sum(x.value for x in new.run.metric_values) == audit_b["sum_of_all_counts"]
     assert len(baseline_mv) == len(baseline_pending) == 1122
